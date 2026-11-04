@@ -1,0 +1,5 @@
+{
+  "name": "DJMaster",
+  "references": ["Oculus.VR"],
+  "autoReferenced": true
+}

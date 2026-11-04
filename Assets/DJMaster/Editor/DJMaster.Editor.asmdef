@@ -1,0 +1,6 @@
+{
+  "name": "DJMaster.Editor",
+  "references": ["DJMaster", "Oculus.VR", "Oculus.VR.Editor"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": false
+}

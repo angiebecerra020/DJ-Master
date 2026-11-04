@@ -1,0 +1,8 @@
+{
+  "name": "DJMaster.Tests.PlayMode",
+  "references": ["DJMaster", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "precompiledReferences": ["nunit.framework.dll"],
+  "overrideReferences": true,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "autoReferenced": false
+}

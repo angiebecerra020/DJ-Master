@@ -1,0 +1,1063 @@
+using System.Collections.Generic;
+using System.IO;
+using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace DJMaster.EditorTools
+{
+    // Builds the whole game from primitives so the project needs no art or audio assets.
+    // Menu: DJ Master > Build Scene. Re-run any time; it overwrites the scene.
+    //
+    // Coordinates: the World root is the DJ's seat on the venue floor, facing +Z.
+    // The board's top surface is the Board transform's local y = 0, with +Z away from the player.
+    public static class SceneBuilder
+    {
+        const string GeneratedDir = "Assets/DJMaster/Generated";
+        const string ScenePath = "Assets/Scenes/DJMaster.unity";
+        const string CorePrefabs = "Packages/com.meta.xr.sdk.core/Prefabs/";
+
+        static Font font;
+        static Material glowMat, additiveMat, textMat;
+        static readonly Color DeckAColor = new Color(0.1f, 0.85f, 1f);
+        static readonly Color DeckBColor = new Color(1f, 0.25f, 0.75f);
+        static readonly Color LabelColor = new Color(0.75f, 0.78f, 0.85f);
+
+        [MenuItem("DJ Master/Build Scene")]
+        public static void Build()
+        {
+            Directory.CreateDirectory(GeneratedDir);
+            Directory.CreateDirectory("Assets/Scenes");
+            AssetDatabase.Refresh();
+
+            font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            textMat = font.material;
+            PlayerSettings.colorSpace = ColorSpace.Linear;
+            QualitySettings.pixelLightCount = 2;
+
+            EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            RenderSettings.ambientMode = AmbientMode.Flat;
+            Lightmapping.bakedGI = false;
+            Lightmapping.realtimeGI = false;
+
+            glowMat = MaterialAsset("Glow", "DJMaster/Glow");
+            glowMat.color = new Color(1, 0.85f, 0.2f, 0.6f);
+            additiveMat = MaterialAsset("Additive", "DJMaster/Additive");
+
+            // ---------- World, audio, board ----------
+            var world = new GameObject("World").transform;
+            var anchor = world.gameObject.AddComponent<SeatedAnchor>();
+
+            var audioRoot = new GameObject("Audio").transform;
+            audioRoot.SetParent(world, false);
+            var deckA = MakeDeck("Deck A", "A", audioRoot);
+            var deckB = MakeDeck("Deck B", "B", audioRoot);
+            var mixer = audioRoot.gameObject.AddComponent<Mixer>();
+            mixer.decks = new[] { deckA, deckB };
+            var judge = audioRoot.gameObject.AddComponent<MixJudge>();
+            judge.mixer = mixer;
+            var sfx = audioRoot.gameObject.AddComponent<Sfx>();
+            sfx.uiSource = AudioChild("UI", audioRoot);
+            sfx.crowdSource = AudioChild("Crowd", audioRoot);
+            sfx.ambienceSource = AudioChild("Ambience", audioRoot);
+
+            var board = BuildBoard(world, mixer, deckA, deckB, out var displays, out var sync);
+            sync.judge = judge;
+            sync.mixer = mixer;
+
+            var panel = BuildPanel(board.transform);
+            var scenePanel = BuildScenePanel(board.transform, out var roomBtn, out var clubBtn, out var festBtn, out var recenterBtn, out var upBtn, out var downBtn);
+
+            // ---------- Venues ----------
+            var club = BuildClub(world);
+            var festival = BuildFestival(world);
+            var standIn = BuildEditorRoom(world);
+
+            // ---------- Rig and hands ----------
+            var rig = BuildRig(out var cam, out var head);
+            anchor.head = head;
+
+            var keyLight = new GameObject("Key Light").AddComponent<Light>();
+            keyLight.type = LightType.Directional;
+            keyLight.transform.rotation = Quaternion.Euler(55, -25, 0);
+            keyLight.shadows = LightShadows.None;
+            keyLight.color = new Color(1f, 0.96f, 0.92f);
+
+            // ---------- Directors ----------
+            var directors = new GameObject("Directors");
+            var env = directors.AddComponent<EnvironmentManager>();
+            env.cam = cam;
+            env.keyLight = keyLight;
+            env.passthrough = rig.GetComponent<OVRPassthroughLayer>();
+            env.editorRoomStandIn = standIn;
+            env.room = new EnvironmentManager.Look { root = null, ambient = new Color(0.55f, 0.55f, 0.6f), keyLight = 0.7f };
+            env.club = new EnvironmentManager.Look { root = club, ambient = new Color(0.22f, 0.18f, 0.3f), fogColor = new Color(0.03f, 0.0f, 0.05f), fogDensity = 0.045f, keyLight = 0.25f };
+            env.festival = new EnvironmentManager.Look { root = festival, skybox = NightSky(), ambient = new Color(0.25f, 0.25f, 0.38f), fogColor = new Color(0.03f, 0.03f, 0.09f), fogDensity = 0.008f, keyLight = 0.3f };
+            env.roomButton = roomBtn; env.clubButton = clubBtn; env.festivalButton = festBtn;
+
+            var lessons = directors.AddComponent<LessonDirector>();
+            lessons.board = board; lessons.mixer = mixer; lessons.judge = judge;
+
+            var game = directors.AddComponent<GameDirector>();
+            game.board = board; game.mixer = mixer; game.judge = judge; game.lessons = lessons;
+            game.panel = panel; game.environment = env; game.anchor = anchor;
+            game.roomButton = roomBtn; game.clubButton = clubBtn; game.festivalButton = festBtn;
+            game.recenterButton = recenterBtn; game.raiseButton = upBtn; game.lowerButton = downBtn;
+
+            EditorSceneManager.SaveScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene(), ScenePath);
+            EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
+            AssetDatabase.SaveAssets();
+            Debug.Log("[DJMaster] Scene built: " + ScenePath);
+        }
+
+        // ================= Audio =================
+
+        static Deck MakeDeck(string name, string id, Transform parent)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var src = go.AddComponent<AudioSource>();
+            src.playOnAwake = false;
+            src.spatialBlend = 0;
+            go.AddComponent<ChannelStrip>();
+            var d = go.AddComponent<Deck>();
+            d.deckName = id;
+            return d;
+        }
+
+        static AudioSource AudioChild(string name, Transform parent)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var s = go.AddComponent<AudioSource>();
+            s.playOnAwake = false;
+            s.spatialBlend = 0;
+            return s;
+        }
+
+        // ================= Board =================
+
+        static DJBoard BuildBoard(Transform world, Mixer mixer, Deck deckA, Deck deckB, out DeckDisplay[] displays, out SyncMeter sync)
+        {
+            var bodyMat = Lit("BoardBody", new Color(0.07f, 0.07f, 0.08f), 0.55f);
+            var plateMat = Lit("BoardPlate", new Color(0.13f, 0.13f, 0.15f), 0.4f);
+            var slotMat = Unlit("Slot", new Color(0.01f, 0.01f, 0.012f));
+            var metalMat = Lit("Metal", new Color(0.55f, 0.56f, 0.6f), 0.8f);
+            var capMat = Unlit("Cap", Color.gray);
+            var screenMat = Unlit("Screen", new Color(0.015f, 0.02f, 0.03f));
+            var platterMat = Lit("Platter", new Color(0.05f, 0.05f, 0.055f), 0.7f);
+            var white = Unlit("White", new Color(0.95f, 0.95f, 0.95f));
+            var ringA = Unlit("RingA", DeckAColor);
+            var ringB = Unlit("RingB", DeckBColor);
+
+            var boardGo = new GameObject("Board");
+            var t = boardGo.transform;
+            t.SetParent(world, false);
+            t.localPosition = new Vector3(0, 0.82f, 0.40f);
+            var board = boardGo.AddComponent<DJBoard>();
+            board.mixer = mixer;
+
+            Box("Body", t, new Vector3(0, -0.026f, 0.0175f), new Vector3(0.74f, 0.05f, 0.465f), bodyMat);
+            Box("MixerPlate", t, new Vector3(0, -0.0005f, -0.005f), new Vector3(0.24f, 0.002f, 0.41f), plateMat);
+            // Sits just behind the three screens, tilted 30 degrees back to face the player.
+            Box("ScreenHousing", t, new Vector3(0, 0.045f, 0.276f), new Vector3(0.74f, 0.11f, 0.06f), bodyMat, 0, 30);
+
+            board.channels = new DeckControls[2];
+            displays = new DeckDisplay[2];
+            for (int i = 0; i < 2; i++)
+            {
+                float side = i == 0 ? -1 : 1;
+                string p = i == 0 ? "A" : "B";
+                var deck = i == 0 ? deckA : deckB;
+                var ring = i == 0 ? ringA : ringB;
+                var color = i == 0 ? DeckAColor : DeckBColor;
+                float dx = side * 0.225f;
+
+                var ch = new DeckControls { deck = deck };
+                ch.jog = MakeJog($"{p}.jog", t, new Vector3(dx, 0.016f, 0.035f), deck, platterMat, ring, white);
+                ch.play = MakeButton($"{p}.play", "PLAY", t, new Vector3(dx - 0.05f, 0.012f, -0.145f), new Vector2(0.038f, 0.034f), capMat, new Color(0.1f, 1f, 0.35f));
+                ch.cue = MakeButton($"{p}.cue", "CUE", t, new Vector3(dx + 0.002f, 0.012f, -0.145f), new Vector2(0.038f, 0.034f), capMat, new Color(1f, 0.6f, 0.1f));
+                ch.load = MakeButton($"{p}.load", "LOAD", t, new Vector3(dx + side * 0.045f, 0.01f, 0.16f), new Vector2(0.034f, 0.024f), capMat, color);
+                ch.tempo = MakeFader($"{p}.tempo", "TEMPO", t, new Vector3(side * 0.327f, 0f, 0f), 0.15f, false, slotMat, capMat, 0.5f);
+                ch.tempo.dragRatio = 0.35f;
+                ch.tempo.detent = 0.5f;
+                Label(t, "+", new Vector3(side * 0.327f, 0.001f, 0.09f), 0.0018f, LabelColor);
+                Label(t, "-", new Vector3(side * 0.327f, 0.001f, -0.09f), 0.0018f, LabelColor);
+
+                float mx = side * 0.06f;
+                float labelX = mx + side * 0.034f;
+                ch.high = MakeKnob($"{p}.high", t, new Vector3(mx, 0.02f, 0.165f), capMat, white, color);
+                ch.mid = MakeKnob($"{p}.mid", t, new Vector3(mx, 0.02f, 0.12f), capMat, white, color);
+                ch.low = MakeKnob($"{p}.low", t, new Vector3(mx, 0.02f, 0.075f), capMat, white, color);
+                ch.filter = MakeKnob($"{p}.filter", t, new Vector3(mx, 0.02f, 0.03f), capMat, white, new Color(0.9f, 0.9f, 0.3f));
+                Label(t, "HI", new Vector3(labelX, 0.001f, 0.165f), 0.0012f, LabelColor);
+                Label(t, "MID", new Vector3(labelX, 0.001f, 0.12f), 0.0012f, LabelColor);
+                Label(t, "LOW", new Vector3(labelX, 0.001f, 0.075f), 0.0012f, LabelColor);
+                Label(t, "FILTER", new Vector3(labelX + side * 0.004f, 0.001f, 0.03f), 0.0011f, LabelColor);
+                ch.headphones = MakeButton($"{p}.headphones", "PHONES", t, new Vector3(mx, 0.01f, -0.012f), new Vector2(0.036f, 0.022f), capMat, new Color(1f, 0.85f, 0.1f));
+                ch.volume = MakeFader($"{p}.volume", "", t, new Vector3(mx, 0f, -0.087f), 0.085f, false, slotMat, capMat, 0f);
+                Label(t, p, new Vector3(mx, 0.001f, -0.142f), 0.0022f, color);
+
+                board.channels[i] = ch;
+                displays[i] = MakeDeckDisplay(p, t, new Vector3(dx, 0.062f, 0.247f), deck, screenMat, color);
+            }
+
+            board.crossfader = MakeFader("crossfader", "", t, new Vector3(0, 0f, -0.172f), 0.1f, true, slotMat, capMat, 0.5f);
+            Label(t, "A", new Vector3(-0.065f, 0.001f, -0.172f), 0.0015f, DeckAColor);
+            Label(t, "B", new Vector3(0.065f, 0.001f, -0.172f), 0.0015f, DeckBColor);
+            board.tap = MakeButton("tap", "TAP", t, new Vector3(0, 0.012f, 0.145f), new Vector2(0.03f, 0.03f), capMat, new Color(1f, 0.3f, 0.2f));
+            board.airHorn = MakeButton("airhorn", "HORN", t, new Vector3(0, 0.012f, 0.075f), new Vector2(0.03f, 0.03f), capMat, new Color(1f, 0.1f, 0.1f));
+            board.airHorn.onColor = new Color(1f, 0.15f, 0.1f);
+
+            sync = MakeSyncMeter(t, new Vector3(0, 0.062f, 0.247f), screenMat);
+            return board;
+        }
+
+        static PokeButton MakeButton(string id, string label, Transform parent, Vector3 pos, Vector2 size, Material capMat, Color onColor, Quaternion? rot = null)
+            => MakeButton(id, label, parent, pos, size, capMat, onColor, out _, rot);
+
+        static PokeButton MakeButton(string id, string label, Transform parent, Vector3 pos, Vector2 size, Material capMat, Color onColor, out TextMesh labelText,
+            Quaternion? rot = null, float labelSize = 0.0011f, Color? labelColor = null)
+        {
+            var go = new GameObject(id);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localRotation = rot ?? Quaternion.identity;
+            var b = go.AddComponent<PokeButton>();
+            b.id = id; b.label = label; b.size = size; b.onColor = onColor;
+
+            var bezel = Prim(PrimitiveType.Cube, "Bezel", go.transform, new Vector3(0, -0.011f, 0), new Vector3(size.x + 0.006f, 0.004f, size.y + 0.006f), Lit("Bezel", new Color(0.03f, 0.03f, 0.035f), 0.3f));
+            var cap = Prim(PrimitiveType.Cube, "Cap", go.transform, new Vector3(0, -0.005f, 0), new Vector3(size.x, 0.01f, size.y), capMat);
+            b.cap = cap.transform;
+            b.capRenderer = cap.GetComponent<Renderer>();
+            b.glow = Prim(PrimitiveType.Cube, "Glow", go.transform, new Vector3(0, -0.006f, 0), new Vector3(size.x + 0.016f, 0.008f, size.y + 0.016f), glowMat).GetComponent<Renderer>();
+            labelText = null;
+            if (label != null)
+            {
+                var tm = Text("Label", go.transform, new Vector3(0, 0.0005f, 0), labelSize, TextAnchor.MiddleCenter, labelColor ?? new Color(0.02f, 0.02f, 0.02f));
+                tm.transform.localRotation = Quaternion.Euler(90, 0, 0);
+                tm.text = label;
+                tm.transform.SetParent(cap.transform, true); // ride down with the cap
+                labelText = tm;
+            }
+            AddCollider(go, new Vector3(0, -0.006f, 0), new Vector3(size.x, 0.012f, size.y));
+            return b;
+        }
+
+        static Fader MakeFader(string id, string label, Transform parent, Vector3 pos, float length, bool horizontal, Material slotMat, Material capMat, float value)
+        {
+            var go = new GameObject(id);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            var f = go.AddComponent<Fader>();
+            f.id = id; f.label = label; f.length = length; f.horizontal = horizontal; f.value = value;
+
+            Vector3 along = horizontal ? new Vector3(length + 0.01f, 0.003f, 0.006f) : new Vector3(0.006f, 0.003f, length + 0.01f);
+            Prim(PrimitiveType.Cube, "Slot", go.transform, new Vector3(0, -0.001f, 0), along, slotMat);
+            var cap = new GameObject("Cap").transform;
+            cap.SetParent(go.transform, false);
+            cap.localPosition = new Vector3(0, 0.007f, 0);
+            Vector3 capSize = horizontal ? new Vector3(0.014f, 0.016f, 0.026f) : new Vector3(0.026f, 0.016f, 0.014f);
+            Prim(PrimitiveType.Cube, "CapBody", cap, Vector3.zero, capSize, Lit("FaderCap", new Color(0.12f, 0.12f, 0.13f), 0.5f));
+            Vector3 stripe = horizontal ? new Vector3(0.002f, 0.001f, 0.026f) : new Vector3(0.026f, 0.001f, 0.002f);
+            Prim(PrimitiveType.Cube, "Line", cap, new Vector3(0, 0.0085f, 0), stripe, Unlit("White", Color.white));
+            f.cap = cap;
+            Vector3 glowSize = horizontal ? new Vector3(length + 0.03f, 0.002f, 0.035f) : new Vector3(0.035f, 0.002f, length + 0.03f);
+            f.glow = Prim(PrimitiveType.Cube, "Glow", go.transform, new Vector3(0, 0.0005f, 0), glowSize, glowMat).GetComponent<Renderer>();
+            if (!string.IsNullOrEmpty(label))
+                Label(go.transform, label, horizontal ? new Vector3(0, 0.001f, 0.022f) : new Vector3(0, 0.001f, -length * 0.5f - 0.014f), 0.0011f, LabelColor);
+            AddCollider(go, new Vector3(0, -0.004f, 0), horizontal ? new Vector3(length + 0.02f, 0.008f, 0.03f) : new Vector3(0.03f, 0.008f, length + 0.02f));
+            return f;
+        }
+
+        static Knob MakeKnob(string id, Transform parent, Vector3 pos, Material capMat, Material white, Color ringColor)
+        {
+            var go = new GameObject(id);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            var k = go.AddComponent<Knob>();
+            k.id = id;
+            k.radius = 0.017f;
+            Prim(PrimitiveType.Cylinder, "Skirt", go.transform, new Vector3(0, -0.019f, 0), new Vector3(0.036f, 0.001f, 0.036f), Unlit($"Ring{ColorUtility.ToHtmlStringRGB(ringColor)}", ringColor * 0.6f));
+            Prim(PrimitiveType.Cylinder, "Body", go.transform, new Vector3(0, -0.01f, 0), new Vector3(0.028f, 0.01f, 0.028f), Lit("KnobBody", new Color(0.1f, 0.1f, 0.11f), 0.5f));
+            var ind = new GameObject("Indicator").transform;
+            ind.SetParent(go.transform, false);
+            Prim(PrimitiveType.Cube, "Line", ind, new Vector3(0, 0.0003f, 0.008f), new Vector3(0.003f, 0.001f, 0.012f), white);
+            k.indicator = ind;
+            k.glow = Prim(PrimitiveType.Cylinder, "Glow", go.transform, new Vector3(0, -0.017f, 0), new Vector3(0.048f, 0.002f, 0.048f), glowMat).GetComponent<Renderer>();
+            AddCollider(go, new Vector3(0, -0.01f, 0), new Vector3(0.03f, 0.02f, 0.03f));
+            return k;
+        }
+
+        static JogWheel MakeJog(string id, Transform parent, Vector3 pos, Deck deck, Material platterMat, Material ring, Material white)
+        {
+            var go = new GameObject(id);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            var j = go.AddComponent<JogWheel>();
+            j.id = id; j.deck = deck; j.radius = 0.07f;
+            Prim(PrimitiveType.Cylinder, "Ring", go.transform, new Vector3(0, -0.013f, 0), new Vector3(0.152f, 0.003f, 0.152f), ring);
+            var platter = new GameObject("Platter").transform;
+            platter.SetParent(go.transform, false);
+            Prim(PrimitiveType.Cylinder, "Disc", platter, new Vector3(0, -0.005f, 0), new Vector3(0.14f, 0.005f, 0.14f), platterMat);
+            Prim(PrimitiveType.Cube, "Marker", platter, new Vector3(0, 0.0003f, 0.042f), new Vector3(0.006f, 0.001f, 0.05f), white);
+            Prim(PrimitiveType.Cylinder, "Hub", platter, new Vector3(0, 0.0004f, 0), new Vector3(0.02f, 0.0008f, 0.02f), Lit("Metal", new Color(0.55f, 0.56f, 0.6f), 0.8f));
+            j.platter = platter;
+            j.glow = Prim(PrimitiveType.Cylinder, "Glow", go.transform, new Vector3(0, -0.011f, 0), new Vector3(0.17f, 0.002f, 0.17f), glowMat).GetComponent<Renderer>();
+            AddCollider(go, new Vector3(0, -0.005f, 0), new Vector3(0.14f, 0.01f, 0.14f));
+            return j;
+        }
+
+        static DeckDisplay MakeDeckDisplay(string p, Transform parent, Vector3 pos, Deck deck, Material screenMat, Color color)
+        {
+            var go = new GameObject($"{p}.display");
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localRotation = Quaternion.Euler(30, 0, 0);
+            var d = go.AddComponent<DeckDisplay>();
+            d.deck = deck;
+            Box("Screen", go.transform, new Vector3(0, 0, 0.002f), new Vector3(0.205f, 0.088f, 0.002f), screenMat);
+            d.title = Text("Title", go.transform, new Vector3(-0.095f, 0.039f, 0), 0.0012f, TextAnchor.UpperLeft, Color.white);
+            d.bpm = Text("BPM", go.transform, new Vector3(-0.095f, 0.0f, 0), 0.0019f, TextAnchor.MiddleLeft, color);
+            d.position = Text("Position", go.transform, new Vector3(-0.095f, -0.021f, 0), 0.0012f, TextAnchor.MiddleLeft, LabelColor);
+            d.beatLights = new Renderer[4];
+            for (int i = 0; i < 4; i++)
+                d.beatLights[i] = Box($"Beat{i}", go.transform, new Vector3(-0.086f + i * 0.022f, -0.034f, 0), new Vector3(0.018f, 0.006f, 0.001f), Unlit("BeatLight", Color.gray)).GetComponent<Renderer>();
+            Box("PhraseBack", go.transform, new Vector3(0, -0.041f, 0), new Vector3(0.19f, 0.003f, 0.001f), Unlit("PhraseBack", new Color(0.08f, 0.08f, 0.1f)));
+            var pivot = new GameObject("PhrasePivot").transform;
+            pivot.SetParent(go.transform, false);
+            pivot.localPosition = new Vector3(-0.095f, -0.041f, -0.0005f);
+            Box("Fill", pivot, new Vector3(0.095f, 0, 0), new Vector3(0.19f, 0.003f, 0.001f), Unlit($"Phrase{p}", color));
+            d.phraseFill = pivot;
+            var lvl = new GameObject("LevelPivot").transform;
+            lvl.SetParent(go.transform, false);
+            lvl.localPosition = new Vector3(0.094f, -0.03f, -0.0005f);
+            d.levelFill = Box("Level", lvl, new Vector3(0, 0.03f, 0), new Vector3(0.006f, 0.06f, 0.001f), Unlit("Level", Color.green)).GetComponent<Renderer>();
+            d.levelPivot = lvl;
+            return d;
+        }
+
+        static SyncMeter MakeSyncMeter(Transform parent, Vector3 pos, Material screenMat)
+        {
+            var go = new GameObject("SyncMeter");
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localRotation = Quaternion.Euler(30, 0, 0);
+            var s = go.AddComponent<SyncMeter>();
+            Box("Screen", go.transform, new Vector3(0, 0, 0.002f), new Vector3(0.13f, 0.088f, 0.002f), screenMat);
+            Text("Heading", go.transform, new Vector3(0, 0.04f, 0), 0.0011f, TextAnchor.UpperCenter, LabelColor).text = "SYNC";
+            s.label = Text("Label", go.transform, new Vector3(0, 0.022f, 0), 0.0015f, TextAnchor.UpperCenter, Color.white);
+            Box("Track", go.transform, new Vector3(0, -0.012f, 0), new Vector3(0.1f, 0.006f, 0.001f), Unlit("PhraseBack", new Color(0.08f, 0.08f, 0.1f)));
+            Box("Center", go.transform, new Vector3(0, -0.012f, -0.0004f), new Vector3(0.002f, 0.012f, 0.001f), Unlit("White", Color.white));
+            s.needle = Box("Needle", go.transform, new Vector3(0, -0.012f, -0.0008f), new Vector3(0.008f, 0.01f, 0.001f), Unlit("Needle", new Color(1f, 0.8f, 0.2f))).transform;
+            s.halfWidth = 0.048f;
+            s.lockLight = Prim(PrimitiveType.Cylinder, "Lock", go.transform, new Vector3(0.05f, 0.033f, -0.0005f), new Vector3(0.01f, 0.0005f, 0.01f), Unlit("Lock", Color.gray)).GetComponent<Renderer>();
+            s.lockLight.transform.localRotation = Quaternion.Euler(90, 0, 0);
+            Text("CrowdLabel", go.transform, new Vector3(-0.058f, -0.03f, 0), 0.0009f, TextAnchor.MiddleLeft, LabelColor).text = "CROWD";
+            var pivot = new GameObject("EnergyPivot").transform;
+            pivot.SetParent(go.transform, false);
+            pivot.localPosition = new Vector3(-0.058f, -0.038f, -0.0005f);
+            s.energyFill = Box("Energy", pivot, new Vector3(0.058f, 0, 0), new Vector3(0.116f, 0.005f, 0.001f), Unlit("Energy", Color.magenta)).GetComponent<Renderer>();
+            s.energyPivot = pivot;
+            return s;
+        }
+
+        // ================= Panels =================
+
+        static InstructionPanel BuildPanel(Transform board)
+        {
+            var go = new GameObject("InstructionPanel");
+            go.transform.SetParent(board, false);
+            // Kept low so you can still see the crowd over the top of it.
+            go.transform.localPosition = new Vector3(0, 0.215f, 0.33f);
+            go.transform.localRotation = Quaternion.Euler(10, 0, 0);
+            var p = go.AddComponent<InstructionPanel>();
+            Box("Back", go.transform, new Vector3(0, 0, 0.004f), new Vector3(0.64f, 0.23f, 0.006f), Lit("PanelBack", new Color(0.04f, 0.04f, 0.06f), 0.6f));
+            Box("Edge", go.transform, new Vector3(0, 0.115f, 0.003f), new Vector3(0.64f, 0.004f, 0.007f), Unlit("PanelEdge", DeckAColor));
+            p.title = Text("Title", go.transform, new Vector3(-0.3f, 0.103f, 0), 0.0021f, TextAnchor.UpperLeft, new Color(1f, 0.85f, 0.3f));
+            p.body = Text("Body", go.transform, new Vector3(-0.3f, 0.07f, 0), 0.0015f, TextAnchor.UpperLeft, Color.white);
+            p.feedback = Text("Feedback", go.transform, new Vector3(0, -0.04f, 0), 0.0019f, TextAnchor.MiddleCenter, new Color(0.3f, 1f, 0.5f));
+            p.status = Text("Status", go.transform, new Vector3(-0.3f, -0.062f, 0), 0.0012f, TextAnchor.MiddleLeft, LabelColor);
+            p.wrapChars = 64;
+
+            var faceUser = Quaternion.Euler(-90, 0, 0); // button +Y toward the player
+            p.actionButtons = new PokeButton[3];
+            p.actionLabels = new TextMesh[3];
+            for (int i = 0; i < 3; i++)
+            {
+                var b = MakeButton($"panel.action{i}", "", go.transform, new Vector3(-0.2f + i * 0.2f, -0.088f, -0.004f), new Vector2(0.15f, 0.034f), Unlit("Cap", Color.gray), DeckAColor,
+                    out var label, faceUser, 0.0016f, Color.white);
+                b.offColor = new Color(0.15f, 0.2f, 0.3f);
+                p.actionButtons[i] = b;
+                p.actionLabels[i] = label;
+            }
+            return p;
+        }
+
+        static GameObject BuildScenePanel(Transform board, out PokeButton room, out PokeButton club, out PokeButton fest, out PokeButton recenter, out PokeButton up, out PokeButton down)
+        {
+            var go = new GameObject("ScenePanel");
+            go.transform.SetParent(board, false);
+            go.transform.localPosition = new Vector3(-0.44f, 0.1f, 0.12f);
+            go.transform.localRotation = Quaternion.Euler(10, -38, 0);
+            Box("Back", go.transform, new Vector3(0, 0, 0.004f), new Vector3(0.13f, 0.27f, 0.006f), Lit("PanelBack", new Color(0.04f, 0.04f, 0.06f), 0.6f));
+            Text("Heading", go.transform, new Vector3(0, 0.125f, 0), 0.0014f, TextAnchor.UpperCenter, new Color(1f, 0.85f, 0.3f)).text = "SCENE";
+            var faceUser = Quaternion.Euler(-90, 0, 0);
+            PokeButton Btn(string id, string label, float y, float w = 0.1f, float x = 0)
+            {
+                var b = MakeButton(id, label, go.transform, new Vector3(x, y, -0.004f), new Vector2(w, 0.034f), Unlit("Cap", Color.gray), new Color(1f, 0.3f, 0.75f),
+                    out _, faceUser, 0.0012f, Color.white);
+                b.offColor = new Color(0.15f, 0.15f, 0.22f);
+                return b;
+            }
+            room = Btn("scene.room", "MY ROOM", 0.085f);
+            club = Btn("scene.club", "CLUB", 0.04f);
+            fest = Btn("scene.festival", "FESTIVAL", -0.005f);
+            recenter = Btn("scene.recenter", "RECENTER", -0.06f);
+            up = Btn("scene.up", "BOARD UP", -0.1f, 0.048f, -0.026f);
+            down = Btn("scene.down", "DOWN", -0.1f, 0.048f, 0.026f);
+            recenter.onColor = up.onColor = down.onColor = Color.white;
+            return go;
+        }
+
+        // ================= Venues =================
+
+        static GameObject BuildClub(Transform world)
+        {
+            var root = new GameObject("Club");
+            root.transform.SetParent(world, false);
+            var r = root.transform;
+            var black = Lit("ClubWall", new Color(0.02f, 0.02f, 0.025f), 0.2f);
+            var floor = Lit("ClubFloor", new Color(0.04f, 0.04f, 0.05f), 0.85f);
+            var boothMat = Lit("Booth", new Color(0.05f, 0.05f, 0.06f), 0.5f);
+            var trussMat = Lit("Truss", new Color(0.25f, 0.25f, 0.28f), 0.7f);
+
+            Box("BoothFloor", r, new Vector3(0, -0.05f, 0.2f), new Vector3(4.5f, 0.1f, 3f), floor);
+            Box("BoothFront", r, new Vector3(0, 0.42f, 1.15f), new Vector3(2.6f, 0.95f, 0.12f), boothMat);
+            Box("DJTable", r, new Vector3(0, 0.385f, 0.42f), new Vector3(1.3f, 0.77f, 0.6f), boothMat);
+            Box("DanceFloor", r, new Vector3(0, -0.55f, 8.5f), new Vector3(16f, 0.1f, 14f), floor);
+            Box("WallL", r, new Vector3(-8f, 2f, 6.5f), new Vector3(0.2f, 5f, 18f), black);
+            Box("WallR", r, new Vector3(8f, 2f, 6.5f), new Vector3(0.2f, 5f, 18f), black);
+            Box("WallFar", r, new Vector3(0, 2f, 15.5f), new Vector3(16f, 5f, 0.2f), black);
+            Box("WallBack", r, new Vector3(0, 2f, -2.2f), new Vector3(16f, 5f, 0.2f), black);
+            Box("Ceiling", r, new Vector3(0, 4.5f, 6.5f), new Vector3(16f, 0.2f, 18f), black);
+            Box("TrussA", r, new Vector3(0, 4.2f, 3f), new Vector3(12f, 0.25f, 0.25f), trussMat);
+            Box("TrussB", r, new Vector3(0, 4.2f, 8f), new Vector3(12f, 0.25f, 0.25f), trussMat);
+            Box("Bar", r, new Vector3(-6.5f, 0.05f, 9f), new Vector3(1.2f, 1.1f, 6f), boothMat);
+
+            var pulsers = new List<Renderer>();
+            // LED floor tiles under the crowd
+            for (int x = 0; x < 8; x++)
+                for (int z = 0; z < 6; z++)
+                    if ((x + z) % 2 == 0)
+                        pulsers.Add(Box("Tile", r, new Vector3(-7f + x * 2f, -0.495f, 2.5f + z * 2.2f), new Vector3(1.9f, 0.01f, 2.1f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+            // LED wall behind the DJ
+            for (int x = 0; x < 10; x++)
+                for (int y = 0; y < 4; y++)
+                    pulsers.Add(Box("LED", r, new Vector3(-6.75f + x * 1.5f, 0.6f + y * 1.0f, -2.05f), new Vector3(1.45f, 0.95f, 0.05f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+            // Light strip along the booth front, facing the DJ
+            pulsers.Add(Box("BoothStrip", r, new Vector3(0, 0.9f, 1.08f), new Vector3(2.6f, 0.03f, 0.02f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+            // Neon strips on the side walls
+            for (int i = 0; i < 2; i++)
+                pulsers.Add(Box("Neon", r, new Vector3(i == 0 ? -7.88f : 7.88f, 3.2f, 7f), new Vector3(0.04f, 0.06f, 16f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+
+            var show = root.AddComponent<LightShow>();
+            show.pulsers = pulsers.ToArray();
+            MakeLasers(show, r, 6, i => new Vector3(-2.5f + i, 3.4f, -1.6f), Quaternion.LookRotation(new Vector3(0, -0.18f, 1)), 22f);
+            MakeBeams(show, r, new[]
+            {
+                new Vector3(-4, 4.05f, 3), new Vector3(0, 4.05f, 3), new Vector3(4, 4.05f, 3),
+                new Vector3(-4, 4.05f, 8), new Vector3(0, 4.05f, 8), new Vector3(4, 4.05f, 8),
+            }, Quaternion.Euler(90, 0, 0), 5f, 0.9f);
+
+            // Mirror ball with glints
+            var ball = new GameObject("MirrorBall").transform;
+            ball.SetParent(r, false);
+            ball.localPosition = new Vector3(0, 3.7f, 6f);
+            Prim(PrimitiveType.Sphere, "Ball", ball, Vector3.zero, Vector3.one * 0.5f, Lit("Mirror", new Color(0.6f, 0.6f, 0.65f), 0.95f));
+            var glints = new GameObject("Glints");
+            glints.transform.SetParent(ball, false);
+            glints.AddComponent<MeshFilter>().sharedMesh = SaveMesh(MeshKit.Sparkles(160, 0.26f, 0.012f, false, 3), "Glints");
+            glints.AddComponent<MeshRenderer>().sharedMaterial = AdditiveVariant("SparkleAdd", new Color(1, 1, 1, 1), 1);
+            show.spinner = ball;
+
+            show.lights = new[]
+            {
+                PointLight("Wash L", r, new Vector3(-4, 3.5f, 6), 2.2f, 12),
+                PointLight("Wash R", r, new Vector3(4, 3.5f, 6), 2.2f, 12),
+            };
+            show.fireworks = new[]
+            {
+                Confetti(r, new Vector3(-3, 4f, 6)),
+                Confetti(r, new Vector3(3, 4f, 6)),
+            };
+
+            var crowd = root.AddComponent<Crowd>();
+            crowd.count = 90;
+            crowd.areaMin = new Vector2(-7, 2.4f);
+            crowd.areaMax = new Vector2(7, 14);
+            crowd.floorY = -0.5f;
+            crowd.bodyMaterial = CrowdMaterial("CrowdBody", new Color(0.12f, 0.1f, 0.14f));
+            crowd.glowMaterial = AdditiveVariant("GlowStick", new Color(0.3f, 1f, 0.6f, 1f), 0, instanced: true);
+            crowd.seed = 5;
+            root.SetActive(false);
+            return root;
+        }
+
+        static GameObject BuildFestival(Transform world)
+        {
+            var root = new GameObject("Festival");
+            root.transform.SetParent(world, false);
+            var r = root.transform;
+            var stage = Lit("Stage", new Color(0.06f, 0.06f, 0.07f), 0.5f);
+            var ground = Lit("Grass", new Color(0.03f, 0.05f, 0.035f), 0.1f);
+            var trussMat = Lit("Truss", new Color(0.25f, 0.25f, 0.28f), 0.7f);
+            var speaker = Lit("Speaker", new Color(0.02f, 0.02f, 0.02f), 0.3f);
+
+            Box("StageFloor", r, new Vector3(0, -0.1f, -1.5f), new Vector3(26f, 0.2f, 9f), stage);
+            Box("StageFace", r, new Vector3(0, -1.05f, 2.95f), new Vector3(26f, 1.9f, 0.1f), speaker);
+            Box("DJTable", r, new Vector3(0, 0.385f, 0.42f), new Vector3(1.3f, 0.77f, 0.6f), stage);
+            Box("Ground", r, new Vector3(0, -2.05f, 70f), new Vector3(220f, 0.1f, 140f), ground);
+            foreach (float x in new[] { -12.5f, 12.5f })
+            {
+                Box("PillarFront", r, new Vector3(x, 5f, 2.5f), new Vector3(0.6f, 14f, 0.6f), trussMat);
+                Box("PillarBack", r, new Vector3(x, 5f, -6f), new Vector3(0.6f, 14f, 0.6f), trussMat);
+                Box("SpeakerStack", r, new Vector3(x * 0.78f, 1.5f, 1.8f), new Vector3(1.6f, 3f, 1.2f), speaker);
+            }
+            Box("RoofFront", r, new Vector3(0, 11.8f, 2.5f), new Vector3(25.6f, 0.7f, 0.7f), trussMat);
+            Box("Roof", r, new Vector3(0, 12.2f, -1.75f), new Vector3(25.6f, 0.2f, 9f), speaker);
+
+            var pulsers = new List<Renderer>();
+            // Light bars on the stage frame, visible from the DJ booth
+            for (int i = 0; i < 12; i++)
+            {
+                float x = -11f + i * 2f;
+                pulsers.Add(Box("RoofBar", r, new Vector3(x, 11.35f, 2.3f), new Vector3(1.6f, 0.12f, 0.12f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+            }
+            foreach (float x in new[] { -12.1f, 12.1f })
+                for (int y = 0; y < 6; y++)
+                    pulsers.Add(Box("PillarLED", r, new Vector3(x, 0.8f + y * 1.8f, 2.15f), new Vector3(0.12f, 1.5f, 0.12f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+            // Big side screens angled toward the crowd and the stage
+            foreach (float x in new[] { -18f, 18f })
+            {
+                var screen = Box("SideScreen", r, new Vector3(x, 5f, 8f), new Vector3(7f, 4.5f, 0.2f), Unlit("LEDTile", Color.white), x < 0 ? 35f : -35f);
+                pulsers.Add(screen.GetComponent<Renderer>());
+                Box("ScreenPole", r, new Vector3(x, 1f, 8.3f), new Vector3(0.3f, 6f, 0.3f), trussMat);
+            }
+            // Giant LED wall behind the DJ
+            for (int x = 0; x < 8; x++)
+                for (int y = 0; y < 4; y++)
+                    pulsers.Add(Box("LEDWall", r, new Vector3(-10.5f + x * 3f, 1.5f + y * 2.4f, -5.8f), new Vector3(2.9f, 2.3f, 0.1f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+            // Stage-front strip
+            pulsers.Add(Box("StageStrip", r, new Vector3(0, 0.02f, 2.85f), new Vector3(25f, 0.04f, 0.08f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+            // Flags in the crowd
+            var rng = new System.Random(9);
+            for (int i = 0; i < 10; i++)
+            {
+                var pos = new Vector3(-20f + (float)rng.NextDouble() * 40f, 0f, 10f + (float)rng.NextDouble() * 28f);
+                Box("FlagPole", r, pos + Vector3.up * 0.5f, new Vector3(0.05f, 5f, 0.05f), trussMat);
+                pulsers.Add(Box("Flag", r, pos + new Vector3(0.45f, 2.6f, 0), new Vector3(0.9f, 0.6f, 0.02f), Unlit("LEDTile", Color.white)).GetComponent<Renderer>());
+            }
+
+            var show = root.AddComponent<LightShow>();
+            show.pulsers = pulsers.ToArray();
+            MakeLasers(show, r, 8, i => new Vector3(-7f + i * 2f, 0.3f, 2.8f), Quaternion.LookRotation(new Vector3(0, 0.1f, 1)), 70f);
+            MakeBeams(show, r, new[]
+            {
+                new Vector3(-10, 11.2f, 2.6f), new Vector3(-5, 11.2f, 2.6f), new Vector3(5, 11.2f, 2.6f), new Vector3(10, 11.2f, 2.6f),
+                new Vector3(-24, 0f, 30f), new Vector3(24, 0f, 30f), new Vector3(-30, 0f, 55f), new Vector3(30, 0f, 55f),
+            }, Quaternion.identity, 45f, 4f, beamIndex => beamIndex < 4 ? Quaternion.Euler(55, 0, 0) : Quaternion.Euler(-70, beamIndex % 2 == 0 ? 20 : -20, 0));
+
+            var stars = new GameObject("Stars");
+            stars.transform.SetParent(r, false);
+            stars.AddComponent<MeshFilter>().sharedMesh = SaveMesh(MeshKit.Sparkles(900, 300f, 0.7f, true, 4), "Stars");
+            stars.AddComponent<MeshRenderer>().sharedMaterial = AdditiveVariant("StarAdd", new Color(0.9f, 0.9f, 1f, 1f), 1);
+            Prim(PrimitiveType.Sphere, "Moon", r, new Vector3(-90f, 120f, 220f), Vector3.one * 14f, Unlit("Moon", new Color(0.85f, 0.85f, 0.8f)));
+
+            show.fireworks = new[]
+            {
+                Firework(r, new Vector3(-14, 22, 45), new Color(1f, 0.3f, 0.6f), new Color(1f, 0.85f, 0.3f)),
+                Firework(r, new Vector3(0, 26, 52), new Color(0.3f, 0.7f, 1f), new Color(1f, 1f, 1f)),
+                Firework(r, new Vector3(14, 22, 45), new Color(0.5f, 1f, 0.4f), new Color(0.8f, 0.3f, 1f)),
+            };
+            show.lights = new[] { PointLight("Stage Wash", r, new Vector3(0, 9f, 6f), 1.6f, 30f) };
+
+            var crowd = root.AddComponent<Crowd>();
+            crowd.count = 420;
+            crowd.areaMin = new Vector2(-24, 5f);
+            crowd.areaMax = new Vector2(24, 42f);
+            crowd.floorY = -2f;
+            crowd.bodyMaterial = CrowdMaterial("CrowdBody", new Color(0.12f, 0.1f, 0.14f));
+            crowd.glowMaterial = AdditiveVariant("PhoneLight", new Color(1f, 0.95f, 0.85f, 1f), 0, instanced: true);
+            crowd.glowChance = 0.25f;
+            crowd.seed = 8;
+            root.SetActive(false);
+            return root;
+        }
+
+        // A grey room with a desk so the board has context in the editor, where passthrough isn't available.
+        static GameObject BuildEditorRoom(Transform world)
+        {
+            var root = new GameObject("EditorRoomStandIn");
+            root.transform.SetParent(world, false);
+            var r = root.transform;
+            var wall = Lit("StandInWall", new Color(0.55f, 0.53f, 0.5f), 0.1f);
+            var floorMat = Lit("StandInFloor", new Color(0.35f, 0.3f, 0.26f), 0.2f);
+            var desk = Lit("StandInDesk", new Color(0.45f, 0.33f, 0.22f), 0.3f);
+            Box("Floor", r, new Vector3(0, -0.05f, 1f), new Vector3(5f, 0.1f, 6f), floorMat);
+            Box("WallFront", r, new Vector3(0, 1.4f, 2.6f), new Vector3(5f, 2.8f, 0.1f), wall);
+            Box("WallLeft", r, new Vector3(-2.5f, 1.4f, 1f), new Vector3(0.1f, 2.8f, 6f), wall);
+            Box("WallRight", r, new Vector3(2.5f, 1.4f, 1f), new Vector3(0.1f, 2.8f, 6f), wall);
+            Box("Desk", r, new Vector3(0, 0.745f, 0.5f), new Vector3(1.4f, 0.05f, 0.75f), desk);
+            Text("Note", r, new Vector3(0, 2.1f, 2.54f), 0.01f, TextAnchor.MiddleCenter, new Color(0.2f, 0.2f, 0.2f)).text =
+                "EDITOR STAND-IN\nOn Quest you see your real room here (passthrough)";
+            return root;
+        }
+
+        static void MakeLasers(LightShow show, Transform parent, int count, System.Func<int, Vector3> posOf, Quaternion rest, float length)
+        {
+            var mesh = SaveMesh(MeshKit.Laser(length, 0.05f), $"Laser{length:0}");
+            var mat = AdditiveVariant("LaserAdd", Color.green, 3);
+            show.lasers = new Transform[count];
+            show.laserRenderers = new Renderer[count];
+            for (int i = 0; i < count; i++)
+            {
+                var go = new GameObject($"Laser{i}");
+                go.transform.SetParent(parent, false);
+                go.transform.localPosition = posOf(i);
+                go.transform.localRotation = rest;
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var mr = go.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = mat;
+                mr.shadowCastingMode = ShadowCastingMode.Off;
+                show.lasers[i] = go.transform;
+                show.laserRenderers[i] = mr;
+            }
+        }
+
+        static void MakeBeams(LightShow show, Transform parent, Vector3[] positions, Quaternion rest, float length, float radius, System.Func<int, Quaternion> restOf = null)
+        {
+            var mesh = SaveMesh(MeshKit.Beam(16, length, radius), $"Beam{length:0}");
+            var mat = AdditiveVariant("BeamAdd", Color.white, 2);
+            var fixture = Lit("Fixture", new Color(0.05f, 0.05f, 0.05f), 0.5f);
+            show.beams = new Transform[positions.Length];
+            show.beamRenderers = new Renderer[positions.Length];
+            for (int i = 0; i < positions.Length; i++)
+            {
+                var go = new GameObject($"Beam{i}");
+                go.transform.SetParent(parent, false);
+                go.transform.localPosition = positions[i];
+                go.transform.localRotation = restOf != null ? restOf(i) : rest;
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var mr = go.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = mat;
+                mr.shadowCastingMode = ShadowCastingMode.Off;
+                Prim(PrimitiveType.Cube, "Head", go.transform, Vector3.zero, new Vector3(0.3f, 0.3f, 0.35f), fixture);
+                show.beams[i] = go.transform;
+                show.beamRenderers[i] = mr;
+            }
+        }
+
+        static ParticleSystem Firework(Transform parent, Vector3 pos, Color a, Color b)
+        {
+            var ps = Particles("Firework", parent, pos);
+            var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(1.4f, 2.2f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(6f, 11f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.4f, 0.8f);
+            main.gravityModifier = 0.35f;
+            main.startColor = new ParticleSystem.MinMaxGradient(a, b);
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Sphere;
+            shape.radius = 0.3f;
+            return ps;
+        }
+
+        static ParticleSystem Confetti(Transform parent, Vector3 pos)
+        {
+            var ps = Particles("Confetti", parent, pos);
+            var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(3f, 4.5f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(1f, 3f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.05f, 0.09f);
+            main.gravityModifier = 0.08f;
+            var g = new Gradient();
+            g.SetKeys(new[] { new GradientColorKey(new Color(1f, 0.2f, 0.6f), 0), new GradientColorKey(new Color(0.2f, 0.8f, 1f), 0.5f), new GradientColorKey(new Color(1f, 0.9f, 0.2f), 1) },
+                      new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(1, 1) });
+            main.startColor = new ParticleSystem.MinMaxGradient(g) { mode = ParticleSystemGradientMode.RandomColor };
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Box;
+            shape.scale = new Vector3(3f, 0.1f, 4f);
+            return ps;
+        }
+
+        static ParticleSystem Particles(string name, Transform parent, Vector3 pos)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main = ps.main;
+            main.loop = false;
+            main.playOnAwake = false;
+            main.maxParticles = 800;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            var em = ps.emission;
+            em.rateOverTime = 0;
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            var fade = new Gradient();
+            fade.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(Color.white, 1) },
+                         new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(1, 0.6f), new GradientAlphaKey(0, 1) });
+            col.color = fade;
+            var pr = go.GetComponent<ParticleSystemRenderer>();
+            pr.sharedMaterial = AdditiveVariant("ParticleAdd", Color.white, 1);
+            pr.shadowCastingMode = ShadowCastingMode.Off;
+            return ps;
+        }
+
+        static Material NightSky()
+        {
+            var m = MaterialAsset("NightSky", "Skybox/Procedural");
+            m.SetFloat("_SunDisk", 0);
+            m.SetFloat("_SunSize", 0);
+            m.SetFloat("_AtmosphereThickness", 0.55f);
+            m.SetColor("_SkyTint", new Color(0.15f, 0.12f, 0.35f));
+            m.SetColor("_GroundColor", new Color(0.01f, 0.01f, 0.02f));
+            m.SetFloat("_Exposure", 0.18f);
+            return m;
+        }
+
+        // ================= Rig =================
+
+        static GameObject BuildRig(out Camera cam, out Transform head)
+        {
+            var rigPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(CorePrefabs + "OVRCameraRig.prefab");
+            var rig = (GameObject)PrefabUtility.InstantiatePrefab(rigPrefab);
+            rig.name = "OVRCameraRig";
+            var cameraRig = rig.GetComponent<OVRCameraRig>();
+
+            var manager = rig.GetComponent<OVRManager>();
+            var so = new SerializedObject(manager);
+            so.FindProperty("isInsightPassthroughEnabled").boolValue = true;
+            so.FindProperty("_trackingOriginType").intValue = (int)OVRManager.TrackingOrigin.FloorLevel;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            rig.AddComponent<OVRPassthroughLayer>();
+
+            var trackingSpace = rig.transform.Find("TrackingSpace");
+            head = trackingSpace.Find("CenterEyeAnchor");
+            cam = head.GetComponent<Camera>();
+            cam.nearClipPlane = 0.02f;
+            cam.farClipPlane = 600f;
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = new Color(0, 0, 0, 0);
+
+            var tipMat = MaterialAsset("FingerTip", "DJMaster/Glow");
+            tipMat.color = new Color(0.6f, 0.9f, 1f, 0.6f);
+            AddHand(trackingSpace.Find("LeftHandAnchor"), OVRHand.Hand.HandLeft, rig.transform, tipMat);
+            AddHand(trackingSpace.Find("RightHandAnchor"), OVRHand.Hand.HandRight, rig.transform, tipMat);
+
+            var mouse = rig.AddComponent<MousePointerSource>();
+            mouse.cam = cam;
+            mouse.lookPivot = trackingSpace;
+            mouse.rigRoot = rig.transform;
+            _ = cameraRig;
+            return rig;
+        }
+
+        static void AddHand(Transform anchor, OVRHand.Hand which, Transform rigRoot, Material tipMat)
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(CorePrefabs + "OVRHandPrefab.prefab");
+            var hand = (GameObject)PrefabUtility.InstantiatePrefab(prefab, anchor);
+            bool left = which == OVRHand.Hand.HandLeft;
+            hand.name = left ? "LeftHand" : "RightHand";
+
+            var ovrHand = hand.GetComponent<OVRHand>();
+            var so = new SerializedObject(ovrHand);
+            so.FindProperty("HandType").intValue = (int)which;
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            var skel = hand.GetComponent<OVRSkeleton>();
+            so = new SerializedObject(skel);
+            so.FindProperty("_skeletonType").intValue = (int)(left ? OVRSkeleton.SkeletonType.XRHandLeft : OVRSkeleton.SkeletonType.XRHandRight);
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            var mesh = hand.GetComponent<OVRMesh>();
+            so = new SerializedObject(mesh);
+            so.FindProperty("_meshType").intValue = (int)(left ? OVRMesh.MeshType.XRHandLeft : OVRMesh.MeshType.XRHandRight);
+            so.ApplyModifiedPropertiesWithoutUndo();
+
+            var src = hand.AddComponent<HandPointerSource>();
+            src.hand = ovrHand;
+            src.skeleton = skel;
+            var tip = Prim(PrimitiveType.Sphere, left ? "LeftTip" : "RightTip", rigRoot, Vector3.zero, Vector3.one * 0.012f, tipMat);
+            src.tipMarker = tip.GetComponent<Renderer>();
+        }
+
+        // ================= Quest settings =================
+
+        [MenuItem("DJ Master/Configure Player Settings for Quest")]
+        public static void ConfigureQuest()
+        {
+            var android = NamedBuildTarget.Android;
+            PlayerSettings.companyName = "DJ Master";
+            PlayerSettings.productName = "DJ Master";
+            PlayerSettings.colorSpace = ColorSpace.Linear;
+            PlayerSettings.SetApplicationIdentifier(android, "com.djmaster.vr");
+            PlayerSettings.SetScriptingBackend(android, ScriptingImplementation.IL2CPP);
+            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+            PlayerSettings.Android.minSdkVersion = (AndroidSdkVersions)32;
+
+            var config = OVRProjectConfig.CachedProjectConfig;
+            config.handTrackingSupport = OVRProjectConfig.HandTrackingSupport.ControllersAndHands;
+            config.insightPassthroughSupport = OVRProjectConfig.FeatureSupport.Supported;
+            OVRProjectConfig.CommitProjectConfig(config);
+            Debug.Log("[DJMaster] Quest settings applied: hands + passthrough enabled. Now enable OpenXR + Meta XR in XR Plug-in Management (see README).");
+        }
+
+        // ================= Batch-mode helpers =================
+
+        public static void BuildAndConfigure()
+        {
+            ConfigureQuest();
+            Build();
+        }
+
+        public static void BuildAndPreview()
+        {
+            Build();
+            var env = Object.FindAnyObjectByType<EnvironmentManager>();
+            var world = Object.FindAnyObjectByType<SeatedAnchor>().transform;
+            Vector3 eye = world.TransformPoint(new Vector3(0, 1.24f, 0));
+            foreach (var mode in new[] { EnvMode.Room, EnvMode.Club, EnvMode.Festival })
+            {
+                SetPreviewMode(env, mode);
+                RenderPreview($"Preview_{mode}.png", eye, new Vector3(28, 0, 0), 90f, mode != EnvMode.Room);
+                RenderPreview($"Preview_{mode}_Crowd.png", eye, new Vector3(2, 0, 0), 90f, mode != EnvMode.Room);
+            }
+            SetPreviewMode(env, EnvMode.Room);
+            RenderPreview("Preview_Board.png", world.TransformPoint(new Vector3(0, 1.24f, 0.02f)), new Vector3(42, 0, 0), 62f, false);
+            RenderPreview("Preview_Panel.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(8, 0, 0), 60f, false);
+            RenderPreview("Preview_ScenePanel.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(15, -38, 0), 60f, false);
+        }
+
+        static void SetPreviewMode(EnvironmentManager env, EnvMode mode)
+        {
+            if (env.room.root != null) env.room.root.SetActive(mode == EnvMode.Room);
+            env.club.root.SetActive(mode == EnvMode.Club);
+            env.festival.root.SetActive(mode == EnvMode.Festival);
+            env.editorRoomStandIn.SetActive(mode == EnvMode.Room);
+            var look = mode == EnvMode.Club ? env.club : mode == EnvMode.Festival ? env.festival : env.room;
+            RenderSettings.skybox = look.skybox;
+            RenderSettings.ambientLight = look.ambient;
+            RenderSettings.fog = look.fogDensity > 0;
+            RenderSettings.fogColor = look.fogColor;
+            RenderSettings.fogDensity = look.fogDensity;
+            env.keyLight.intensity = look.keyLight;
+            // Static preview: switch on the light show's emitters at mid energy.
+            if (look.root != null)
+            {
+                var show = look.root.GetComponent<LightShow>();
+                var block = new MaterialPropertyBlock();
+                for (int i = 0; i < show.laserRenderers.Length; i++)
+                {
+                    block.SetColor("_Color", show.palette[i % 2]);
+                    show.laserRenderers[i].SetPropertyBlock(block);
+                }
+                for (int i = 0; i < show.pulsers.Length; i++)
+                {
+                    block.SetColor("_Color", show.palette[i % 3] * 0.8f);
+                    show.pulsers[i].SetPropertyBlock(block);
+                }
+                foreach (var b in show.beamRenderers)
+                {
+                    block.SetColor("_Color", new Color(0.6f, 0.4f, 1f, 0.2f));
+                    b.SetPropertyBlock(block);
+                }
+            }
+        }
+
+        static void RenderPreview(string file, Vector3 pos, Vector3 euler, float fov, bool skybox)
+        {
+            var go = new GameObject("PreviewCam");
+            var cam = go.AddComponent<Camera>();
+            go.transform.SetPositionAndRotation(pos, Quaternion.Euler(euler));
+            cam.fieldOfView = fov;
+            cam.nearClipPlane = 0.02f;
+            cam.farClipPlane = 600f;
+            cam.clearFlags = skybox && RenderSettings.skybox != null ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
+            cam.backgroundColor = Color.black;
+            var rt = new RenderTexture(1280, 800, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB) { antiAliasing = 4 };
+            cam.targetTexture = rt;
+
+            // Crowds are drawn procedurally at runtime; stand in with static copies for the snapshot.
+            var temp = new List<GameObject>();
+            foreach (var crowd in Object.FindObjectsByType<Crowd>())
+            {
+                if (!crowd.gameObject.activeInHierarchy) continue;
+                var rng = new System.Random(crowd.seed);
+                for (int i = 0; i < Mathf.Min(crowd.count, 250); i++)
+                {
+                    var p = new Vector3(Mathf.Lerp(crowd.areaMin.x, crowd.areaMax.x, (float)rng.NextDouble()), crowd.floorY, Mathf.Lerp(crowd.areaMin.y, crowd.areaMax.y, (float)rng.NextDouble()));
+                    var body = Prim(PrimitiveType.Capsule, "PreviewPerson", crowd.transform, p + Vector3.up * 0.85f, new Vector3(0.38f, 0.85f, 0.3f), crowd.bodyMaterial);
+                    temp.Add(body);
+                }
+            }
+
+            cam.Render();
+            RenderTexture.active = rt;
+            var tex = new Texture2D(rt.width, rt.height, TextureFormat.RGB24, false);
+            tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+            tex.Apply();
+            RenderTexture.active = null;
+            File.WriteAllBytes(Path.Combine(Directory.GetCurrentDirectory(), "Logs", file), tex.EncodeToPNG());
+            foreach (var t in temp) Object.DestroyImmediate(t);
+            Object.DestroyImmediate(go);
+            Object.DestroyImmediate(rt);
+        }
+
+        // ================= Helpers =================
+
+        static TextMesh Text(string name, Transform parent, Vector3 localPos, float charSize, TextAnchor anchor, Color color)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            var tm = go.AddComponent<TextMesh>();
+            tm.font = font;
+            tm.fontSize = 64;
+            tm.characterSize = charSize;
+            tm.anchor = anchor;
+            tm.alignment = anchor switch
+            {
+                TextAnchor.MiddleLeft or TextAnchor.UpperLeft or TextAnchor.LowerLeft => TextAlignment.Left,
+                TextAnchor.MiddleRight or TextAnchor.UpperRight or TextAnchor.LowerRight => TextAlignment.Right,
+                _ => TextAlignment.Center,
+            };
+            tm.color = color;
+            tm.richText = true;
+            var mr = go.GetComponent<MeshRenderer>();
+            mr.sharedMaterial = textMat;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            return tm;
+        }
+
+        // Flat label printed on the board surface, readable from the player's seat.
+        static TextMesh Label(Transform parent, string text, Vector3 pos, float size, Color color)
+        {
+            var tm = Text("Label", parent, pos, size, TextAnchor.MiddleCenter, color);
+            tm.transform.localRotation = Quaternion.Euler(90, 0, 0);
+            tm.text = text;
+            return tm;
+        }
+
+        static void AddCollider(GameObject go, Vector3 center, Vector3 size)
+        {
+            // Every control is finished by the time its collider goes on: hide its lesson glow until a lesson asks for it.
+            if (go.GetComponent<DJControl>() is { glow: { } g }) g.enabled = false;
+            var c = go.AddComponent<BoxCollider>();
+            c.center = center;
+            c.size = size;
+            c.isTrigger = true;
+        }
+
+        static Material Lit(string name, Color color, float smoothness)
+        {
+            var m = MaterialAsset(name, "Standard");
+            m.color = color;
+            m.SetFloat("_Glossiness", smoothness);
+            return m;
+        }
+
+        static Material Unlit(string name, Color color)
+        {
+            var m = MaterialAsset(name, "Unlit/Color");
+            m.color = color;
+            return m;
+        }
+
+        static Material CrowdMaterial(string name, Color color)
+        {
+            var m = Lit(name, color, 0.2f);
+            m.enableInstancing = true;
+            return m;
+        }
+
+        static Material AdditiveVariant(string name, Color color, float shape, bool instanced = false)
+        {
+            var m = MaterialAsset(name, "DJMaster/Additive");
+            m.color = color;
+            m.SetFloat("_Shape", shape);
+            m.enableInstancing = instanced;
+            return m;
+        }
+
+        static Material MaterialAsset(string name, string shader)
+        {
+            string path = $"{GeneratedDir}/{name}.mat";
+            var s = Shader.Find(shader);
+            if (s == null) throw new System.Exception($"Shader not found: {shader}");
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (m == null)
+            {
+                m = new Material(s);
+                AssetDatabase.CreateAsset(m, path);
+            }
+            m.shader = s;
+            EditorUtility.SetDirty(m);
+            return m;
+        }
+
+        static Mesh SaveMesh(Mesh mesh, string name)
+        {
+            string path = $"{GeneratedDir}/{name}.asset";
+            var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (existing != null)
+            {
+                EditorUtility.CopySerialized(mesh, existing);
+                return existing;
+            }
+            AssetDatabase.CreateAsset(mesh, path);
+            return mesh;
+        }
+
+        static GameObject Box(string name, Transform parent, Vector3 pos, Vector3 scale, Material mat, float rotY = 0, float rotX = 0)
+        {
+            var go = Prim(PrimitiveType.Cube, name, parent, pos, scale, mat);
+            go.transform.localRotation = Quaternion.Euler(rotX, rotY, 0);
+            return go;
+        }
+
+        static GameObject Prim(PrimitiveType type, string name, Transform parent, Vector3 localPos, Vector3 scale, Material mat)
+        {
+            var go = GameObject.CreatePrimitive(type);
+            go.name = name;
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.localScale = scale;
+            var r = go.GetComponent<Renderer>();
+            r.sharedMaterial = mat;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            Object.DestroyImmediate(go.GetComponent<Collider>());
+            return go;
+        }
+
+        static Light PointLight(string name, Transform parent, Vector3 localPos, float intensity, float range)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            var l = go.AddComponent<Light>();
+            l.type = LightType.Point;
+            l.intensity = intensity;
+            l.range = range;
+            l.shadows = LightShadows.None;
+            l.renderMode = LightRenderMode.ForcePixel;
+            return l;
+        }
+    }
+}
