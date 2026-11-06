@@ -107,6 +107,16 @@ namespace DJMaster
             lastWholeBeat = -1;
         }
 
+        // Hot cue: jump to the start of a phrase (bar 0, 4, 8 or 12, shown as 1, 5, 9, 13). While playing, the jump keeps
+        // the position inside the bar, so a beatmatched mix stays in sync.
+        public void HotCue(int bar)
+        {
+            if (!IsLoaded) return;
+            double beat = bar * TrackSynth.BeatsPerBar + (Source.isPlaying ? Beat % TrackSynth.BeatsPerBar : 0);
+            Source.timeSamples = (int)((long)(beat * 60.0 / Track.bpm * clip.frequency) % clip.samples);
+            lastWholeBeat = -1;
+        }
+
         // Jog wheel. Playing: temporary pitch bend from spin speed. Paused: scrub (1 revolution = 1 bar).
         public void Jog(float revolutionsThisFrame, float dt)
         {

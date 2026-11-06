@@ -144,18 +144,17 @@ namespace DJMaster.EditorTools
 
         // ================= Board =================
 
+        // Laid out like a modern two-deck controller: each deck has a big jog wheel on top, round CUE and PLAY
+        // buttons at the front corner, a 2x4 grid of performance pads and a tempo fader on its right.
+        // The mixer runs down the middle: EQ and FILTER knobs, headphone cue, channel faders, crossfader.
         static DJBoard BuildBoard(Transform world, Mixer mixer, Deck deckA, Deck deckB, out DeckDisplay[] displays, out SyncMeter sync)
         {
-            var bodyMat = Lit("BoardBody", new Color(0.07f, 0.07f, 0.08f), 0.55f);
-            var plateMat = Lit("BoardPlate", new Color(0.13f, 0.13f, 0.15f), 0.4f);
+            var bodyMat = Lit("BoardBody", new Color(0.075f, 0.075f, 0.08f), 0.35f);
+            var plateMat = Lit("BoardPlate", new Color(0.1f, 0.1f, 0.11f), 0.3f);
             var slotMat = Unlit("Slot", new Color(0.01f, 0.01f, 0.012f));
-            var metalMat = Lit("Metal", new Color(0.55f, 0.56f, 0.6f), 0.8f);
             var capMat = Unlit("Cap", Color.gray);
             var screenMat = Unlit("Screen", new Color(0.015f, 0.02f, 0.03f));
-            var platterMat = Lit("Platter", new Color(0.05f, 0.05f, 0.055f), 0.7f);
             var white = Unlit("White", new Color(0.95f, 0.95f, 0.95f));
-            var ringA = Unlit("RingA", DeckAColor);
-            var ringB = Unlit("RingB", DeckBColor);
 
             var boardGo = new GameObject("Board");
             var t = boardGo.transform;
@@ -164,10 +163,12 @@ namespace DJMaster.EditorTools
             var board = boardGo.AddComponent<DJBoard>();
             board.mixer = mixer;
 
-            Box("Body", t, new Vector3(0, -0.026f, 0.0175f), new Vector3(0.74f, 0.05f, 0.465f), bodyMat);
-            Box("MixerPlate", t, new Vector3(0, -0.0005f, -0.005f), new Vector3(0.24f, 0.002f, 0.41f), plateMat);
+            Box("Body", t, new Vector3(0, -0.026f, 0.0175f), new Vector3(0.78f, 0.05f, 0.465f), bodyMat);
+            Box("MixerPlate", t, new Vector3(0, -0.0005f, 0.0175f), new Vector3(0.24f, 0.002f, 0.455f), plateMat);
+            Box("GrooveL", t, new Vector3(-0.121f, 0f, 0.0175f), new Vector3(0.003f, 0.002f, 0.455f), slotMat);
+            Box("GrooveR", t, new Vector3(0.121f, 0f, 0.0175f), new Vector3(0.003f, 0.002f, 0.455f), slotMat);
             // Sits just behind the three screens, tilted 30 degrees back to face the player.
-            Box("ScreenHousing", t, new Vector3(0, 0.045f, 0.276f), new Vector3(0.74f, 0.11f, 0.06f), bodyMat, 0, 30);
+            Box("ScreenHousing", t, new Vector3(0, 0.045f, 0.276f), new Vector3(0.78f, 0.11f, 0.06f), bodyMat, 0, 30);
 
             board.channels = new DeckControls[2];
             displays = new DeckDisplay[2];
@@ -176,54 +177,74 @@ namespace DJMaster.EditorTools
                 float side = i == 0 ? -1 : 1;
                 string p = i == 0 ? "A" : "B";
                 var deck = i == 0 ? deckA : deckB;
-                var ring = i == 0 ? ringA : ringB;
                 var color = i == 0 ? DeckAColor : DeckBColor;
-                float dx = side * 0.225f;
+                float ox = i == 0 ? -0.265f : 0.235f; // jog wheel center; the tempo fader sits to its right on both decks
 
                 var ch = new DeckControls { deck = deck };
-                ch.jog = MakeJog($"{p}.jog", t, new Vector3(dx, 0.016f, 0.035f), deck, platterMat, ring, white);
-                ch.play = MakeButton($"{p}.play", "PLAY", t, new Vector3(dx - 0.05f, 0.012f, -0.145f), new Vector2(0.038f, 0.034f), capMat, BoardColors.Play);
-                ch.cue = MakeButton($"{p}.cue", "CUE", t, new Vector3(dx + 0.002f, 0.012f, -0.145f), new Vector2(0.038f, 0.034f), capMat, BoardColors.Cue);
-                ch.load = MakeButton($"{p}.load", "LOAD", t, new Vector3(dx + side * 0.045f, 0.01f, 0.16f), new Vector2(0.034f, 0.024f), capMat, color);
-                ch.tempo = MakeFader($"{p}.tempo", "TEMPO", t, new Vector3(side * 0.327f, 0f, 0f), 0.15f, false, slotMat, capMat, 0.5f);
+                ch.jog = MakeJog($"{p}.jog", t, new Vector3(ox, 0.012f, 0.1f), deck, color, white);
+                Label(t, p, new Vector3(ox + 0.095f, 0.001f, 0.2f), 0.0034f, color);
+
+                ch.load = MakeButton($"{p}.load", "LOAD", t, new Vector3(ox - 0.08f, 0.008f, -0.027f), new Vector2(0.034f, 0.018f), capMat, color);
+                ch.cue = MakeButton($"{p}.cue", "CUE", t, new Vector3(ox - 0.08f, 0.01f, -0.075f), new Vector2(0.038f, 0.038f), capMat, BoardColors.Cue, round: true);
+                ch.play = MakeButton($"{p}.play", "PLAY", t, new Vector3(ox - 0.08f, 0.01f, -0.15f), new Vector2(0.038f, 0.038f), capMat, BoardColors.Play, round: true);
+
+                // Performance pads: hot cues on top, samplers below.
+                Label(t, "HOT CUE", new Vector3(ox + 0.011f, 0.001f, -0.05f), 0.00085f, LabelColor);
+                Label(t, "SAMPLER", new Vector3(ox + 0.011f, 0.001f, -0.1125f), 0.00085f, LabelColor);
+                string[] cueBars = { "1", "5", "9", "13" };
+                for (int k = 0; k < 4; k++)
+                {
+                    float x = ox - 0.04f + k * 0.034f;
+                    ch.hotCues[k] = MakeButton($"{p}.hotcue{k}", cueBars[k], t, new Vector3(x, 0.009f, -0.075f), new Vector2(0.025f, 0.025f), capMat, BoardColors.Cue,
+                        out _, null, 0.0013f);
+                    string sampleId = i == 0 && k == 0 ? "airhorn" : $"{p}.sampler{k}";
+                    ch.samplers[k] = MakeButton(sampleId, Sfx.SampleNames[k], t, new Vector3(x, 0.009f, -0.15f), new Vector2(0.025f, 0.025f), capMat, BoardColors.Crowd,
+                        out _, null, 0.00075f);
+                }
+                if (i == 0) board.airHorn = ch.samplers[0];
+
+                float tx = ox + 0.115f;
+                ch.tempo = MakeFader($"{p}.tempo", "TEMPO", t, new Vector3(tx, 0f, -0.095f), 0.13f, false, slotMat, capMat, 0.5f);
                 ch.tempo.dragRatio = 0.35f;
                 ch.tempo.detent = 0.5f;
-                Label(t, "+", new Vector3(side * 0.327f, 0.001f, 0.09f), 0.0018f, LabelColor);
-                Label(t, "-", new Vector3(side * 0.327f, 0.001f, -0.09f), 0.0018f, LabelColor);
+                Label(t, "-", new Vector3(tx - 0.02f, 0.001f, -0.035f), 0.0018f, LabelColor);
+                Label(t, "+", new Vector3(tx - 0.02f, 0.001f, -0.155f), 0.0018f, LabelColor);
 
-                float mx = side * 0.06f;
-                float labelX = mx + side * 0.034f;
-                ch.high = MakeKnob($"{p}.high", t, new Vector3(mx, 0.02f, 0.165f), capMat, white, color);
-                ch.mid = MakeKnob($"{p}.mid", t, new Vector3(mx, 0.02f, 0.12f), capMat, white, color);
-                ch.low = MakeKnob($"{p}.low", t, new Vector3(mx, 0.02f, 0.075f), capMat, white, color);
-                ch.filter = MakeKnob($"{p}.filter", t, new Vector3(mx, 0.02f, 0.03f), capMat, white, BoardColors.Fx);
-                Label(t, "HI", new Vector3(labelX, 0.001f, 0.165f), 0.0012f, LabelColor);
-                Label(t, "MID", new Vector3(labelX, 0.001f, 0.12f), 0.0012f, LabelColor);
-                Label(t, "LOW", new Vector3(labelX, 0.001f, 0.075f), 0.0012f, LabelColor);
-                Label(t, "FILTER", new Vector3(labelX + side * 0.004f, 0.001f, 0.03f), 0.0011f, LabelColor);
-                ch.headphones = MakeButton($"{p}.headphones", "PHONES", t, new Vector3(mx, 0.01f, -0.012f), new Vector2(0.036f, 0.022f), capMat, BoardColors.Fx);
-                ch.volume = MakeFader($"{p}.volume", "", t, new Vector3(mx, 0f, -0.087f), 0.085f, false, slotMat, capMat, 0f);
-                Label(t, p, new Vector3(mx, 0.001f, -0.142f), 0.0022f, color);
+                // Mixer channel
+                float mx = side * 0.055f;
+                float labelX = side * 0.095f;
+                ch.high = MakeKnob($"{p}.high", t, new Vector3(mx, 0.02f, 0.205f), capMat, white, color);
+                ch.mid = MakeKnob($"{p}.mid", t, new Vector3(mx, 0.02f, 0.165f), capMat, white, color);
+                ch.low = MakeKnob($"{p}.low", t, new Vector3(mx, 0.02f, 0.125f), capMat, white, color);
+                ch.filter = MakeKnob($"{p}.filter", t, new Vector3(mx, 0.02f, 0.075f), capMat, white, BoardColors.Fx);
+                Label(t, "HI", new Vector3(labelX, 0.001f, 0.205f), 0.001f, LabelColor);
+                Label(t, "MID", new Vector3(labelX, 0.001f, 0.165f), 0.001f, LabelColor);
+                Label(t, "LOW", new Vector3(labelX, 0.001f, 0.125f), 0.001f, LabelColor);
+                Label(t, "FILTER", new Vector3(labelX, 0.001f, 0.075f), 0.0009f, LabelColor);
+                ch.headphones = MakeButton($"{p}.headphones", p, t, new Vector3(side * 0.017f, 0.008f, 0.16f), new Vector2(0.024f, 0.018f), capMat, BoardColors.Fx);
+                ch.volume = MakeFader($"{p}.volume", "", t, new Vector3(mx, 0f, -0.075f), 0.085f, false, slotMat, capMat, 0f);
+                Label(t, p, new Vector3(mx, 0.001f, -0.133f), 0.0018f, color);
 
                 board.channels[i] = ch;
-                displays[i] = MakeDeckDisplay(p, t, new Vector3(dx, 0.062f, 0.247f), deck, screenMat, color);
+                displays[i] = MakeDeckDisplay(p, t, new Vector3(i == 0 ? -0.24f : 0.24f, 0.062f, 0.247f), deck, screenMat, color);
             }
 
-            board.crossfader = MakeFader("crossfader", "", t, new Vector3(0, 0f, -0.172f), 0.1f, true, slotMat, capMat, 0.5f);
-            Label(t, "A", new Vector3(-0.065f, 0.001f, -0.172f), 0.0015f, DeckAColor);
-            Label(t, "B", new Vector3(0.065f, 0.001f, -0.172f), 0.0015f, DeckBColor);
-            board.tap = MakeButton("tap", "TAP", t, new Vector3(0, 0.012f, 0.145f), new Vector2(0.03f, 0.03f), capMat, BoardColors.Crowd);
-            board.airHorn = MakeButton("airhorn", "HORN", t, new Vector3(0, 0.012f, 0.075f), new Vector2(0.03f, 0.03f), capMat, BoardColors.Crowd);
+            Label(t, "DJ MASTER", new Vector3(0, 0.001f, 0.215f), 0.0011f, Color.white);
+            Label(t, "PHONES", new Vector3(0, 0.001f, 0.18f), 0.0008f, LabelColor);
+            board.tap = MakeButton("tap", "TAP", t, new Vector3(0, 0.01f, -0.075f), new Vector2(0.03f, 0.03f), capMat, BoardColors.Crowd, round: true);
+            board.crossfader = MakeFader("crossfader", "", t, new Vector3(0, 0f, -0.175f), 0.09f, true, slotMat, capMat, 0.5f);
+            Label(t, "A", new Vector3(-0.065f, 0.001f, -0.175f), 0.0015f, DeckAColor);
+            Label(t, "B", new Vector3(0.065f, 0.001f, -0.175f), 0.0015f, DeckBColor);
 
             sync = MakeSyncMeter(t, new Vector3(0, 0.062f, 0.247f), screenMat);
             return board;
         }
 
-        static PokeButton MakeButton(string id, string label, Transform parent, Vector3 pos, Vector2 size, Material capMat, Color onColor, Quaternion? rot = null)
-            => MakeButton(id, label, parent, pos, size, capMat, onColor, out _, rot);
+        static PokeButton MakeButton(string id, string label, Transform parent, Vector3 pos, Vector2 size, Material capMat, Color onColor, Quaternion? rot = null, bool round = false)
+            => MakeButton(id, label, parent, pos, size, capMat, onColor, out _, rot, round: round);
 
         static PokeButton MakeButton(string id, string label, Transform parent, Vector3 pos, Vector2 size, Material capMat, Color onColor, out TextMesh labelText,
-            Quaternion? rot = null, float labelSize = 0.0011f, Color? labelColor = null)
+            Quaternion? rot = null, float labelSize = 0.0011f, Color? labelColor = null, bool round = false)
         {
             var go = new GameObject(id);
             go.transform.SetParent(parent, false);
@@ -233,11 +254,16 @@ namespace DJMaster.EditorTools
             b.id = id; b.label = label; b.size = size; b.onColor = onColor;
             b.offColor = Color.Lerp(new Color(0.1f, 0.1f, 0.11f), onColor, 0.3f); // a dim tint keeps the color code visible
 
-            var bezel = Prim(PrimitiveType.Cube, "Bezel", go.transform, new Vector3(0, -0.011f, 0), new Vector3(size.x + 0.006f, 0.004f, size.y + 0.006f), Lit("Bezel", new Color(0.03f, 0.03f, 0.035f), 0.3f));
-            var cap = Prim(PrimitiveType.Cube, "Cap", go.transform, new Vector3(0, -0.005f, 0), new Vector3(size.x, 0.01f, size.y), capMat);
+            // Cylinders are 2 units tall, so halve their y scale to match the cubes.
+            var shape = round ? PrimitiveType.Cylinder : PrimitiveType.Cube;
+            float yScale = round ? 0.5f : 1f;
+            var bezel = Prim(shape, "Bezel", go.transform, new Vector3(0, -0.011f, 0), new Vector3(size.x + 0.006f, 0.004f * yScale, size.y + 0.006f), Lit("Bezel", new Color(0.03f, 0.03f, 0.035f), 0.3f));
+            if (round) // a colored ring around the cap, like the CUE and PLAY buttons on a real controller
+                Prim(shape, "Ring", go.transform, new Vector3(0, -0.0085f, 0), new Vector3(size.x + 0.005f, 0.0015f * yScale, size.y + 0.005f), Unlit($"Ring{ColorUtility.ToHtmlStringRGB(onColor)}", onColor * 0.7f));
+            var cap = Prim(shape, "Cap", go.transform, new Vector3(0, -0.005f, 0), new Vector3(size.x, 0.01f * yScale, size.y), capMat);
             b.cap = cap.transform;
             b.capRenderer = cap.GetComponent<Renderer>();
-            b.glow = Prim(PrimitiveType.Cube, "Glow", go.transform, new Vector3(0, -0.006f, 0), new Vector3(size.x + 0.016f, 0.008f, size.y + 0.016f), glowMat).GetComponent<Renderer>();
+            b.glow = Prim(shape, "Glow", go.transform, new Vector3(0, -0.006f, 0), new Vector3(size.x + 0.016f, 0.008f * yScale, size.y + 0.016f), glowMat).GetComponent<Renderer>();
             labelText = null;
             if (label != null)
             {
@@ -296,22 +322,33 @@ namespace DJMaster.EditorTools
             return k;
         }
 
-        static JogWheel MakeJog(string id, Transform parent, Vector3 pos, Deck deck, Material platterMat, Material ring, Material white)
+        // A big jog wheel: a dark textured ring around a black platter with a ring in the deck's color.
+        static JogWheel MakeJog(string id, Transform parent, Vector3 pos, Deck deck, Color color, Material white)
         {
             var go = new GameObject(id);
             go.transform.SetParent(parent, false);
             go.transform.localPosition = pos;
             var j = go.AddComponent<JogWheel>();
-            j.id = id; j.deck = deck; j.radius = 0.07f;
-            Prim(PrimitiveType.Cylinder, "Ring", go.transform, new Vector3(0, -0.013f, 0), new Vector3(0.152f, 0.003f, 0.152f), ring);
+            j.id = id; j.deck = deck; j.radius = 0.085f;
+            var black = Lit("Platter", new Color(0.03f, 0.03f, 0.035f), 0.75f);
+            Prim(PrimitiveType.Cylinder, "Well", go.transform, new Vector3(0, -0.0115f, 0), new Vector3(0.198f, 0.0005f, 0.198f), Unlit("Slot", new Color(0.01f, 0.01f, 0.012f)));
+            Prim(PrimitiveType.Cylinder, "OuterRing", go.transform, new Vector3(0, -0.009f, 0), new Vector3(0.19f, 0.003f, 0.19f), Lit("JogRing", new Color(0.16f, 0.16f, 0.17f), 0.25f));
+            for (int k = 0; k < 48; k++) // grip ridges
+            {
+                var ridge = Prim(PrimitiveType.Cube, "Ridge", go.transform, Vector3.zero, new Vector3(0.0015f, 0.001f, 0.012f), Lit("Ridge", new Color(0.09f, 0.09f, 0.1f), 0.2f));
+                ridge.transform.localRotation = Quaternion.Euler(0, k * 7.5f, 0);
+                ridge.transform.localPosition = ridge.transform.localRotation * new Vector3(0, -0.0055f, 0.087f);
+            }
             var platter = new GameObject("Platter").transform;
             platter.SetParent(go.transform, false);
-            Prim(PrimitiveType.Cylinder, "Disc", platter, new Vector3(0, -0.005f, 0), new Vector3(0.14f, 0.005f, 0.14f), platterMat);
-            Prim(PrimitiveType.Cube, "Marker", platter, new Vector3(0, 0.0003f, 0.042f), new Vector3(0.006f, 0.001f, 0.05f), white);
-            Prim(PrimitiveType.Cylinder, "Hub", platter, new Vector3(0, 0.0004f, 0), new Vector3(0.02f, 0.0008f, 0.02f), Lit("Metal", new Color(0.55f, 0.56f, 0.6f), 0.8f));
+            Prim(PrimitiveType.Cylinder, "Disc", platter, new Vector3(0, -0.004f, 0), new Vector3(0.16f, 0.004f, 0.16f), black);
+            Prim(PrimitiveType.Cylinder, "ColorRing", platter, new Vector3(0, 0.0001f, 0), new Vector3(0.088f, 0.0003f, 0.088f), Unlit($"Ring{ColorUtility.ToHtmlStringRGB(color)}", color));
+            Prim(PrimitiveType.Cylinder, "Center", platter, new Vector3(0, 0.0003f, 0), new Vector3(0.078f, 0.0003f, 0.078f), black);
+            Prim(PrimitiveType.Cube, "Marker", platter, new Vector3(0, 0.0006f, 0.052f), new Vector3(0.006f, 0.001f, 0.06f), white);
+            Prim(PrimitiveType.Cylinder, "Hub", platter, new Vector3(0, 0.0006f, 0), new Vector3(0.016f, 0.0005f, 0.016f), Lit("Metal", new Color(0.55f, 0.56f, 0.6f), 0.8f));
             j.platter = platter;
-            j.glow = Prim(PrimitiveType.Cylinder, "Glow", go.transform, new Vector3(0, -0.011f, 0), new Vector3(0.17f, 0.002f, 0.17f), glowMat).GetComponent<Renderer>();
-            AddCollider(go, new Vector3(0, -0.005f, 0), new Vector3(0.14f, 0.01f, 0.14f));
+            j.glow = Prim(PrimitiveType.Cylinder, "Glow", go.transform, new Vector3(0, -0.009f, 0), new Vector3(0.21f, 0.002f, 0.21f), glowMat).GetComponent<Renderer>();
+            AddCollider(go, new Vector3(0, -0.005f, 0), new Vector3(0.17f, 0.01f, 0.17f));
             return j;
         }
 
@@ -901,12 +938,13 @@ namespace DJMaster.EditorTools
                 RenderPreview($"Preview_{mode}_Crowd.png", eye, new Vector3(2, 0, 0), 90f, mode != EnvMode.Room);
             }
             SetPreviewMode(env, EnvMode.Room);
+            Object.FindAnyObjectByType<SetBuilderPanel>().gameObject.SetActive(false);
             RenderPreview("Preview_Board.png", world.TransformPoint(new Vector3(0, 1.24f, 0.02f)), new Vector3(42, 0, 0), 62f, false);
             RenderPreview("Preview_Panel.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(8, 0, 0), 60f, false);
 
             // The title menu and Build mode, filled in the way they look at runtime.
             var panel = Object.FindAnyObjectByType<InstructionPanel>();
-            var builder = Object.FindAnyObjectByType<SetBuilderPanel>();
+            var builder = Object.FindAnyObjectByType<SetBuilderPanel>(FindObjectsInactive.Include);
             panel.Show("DJ MASTER",
                 "Choose a mode:\n" +
                 $"{BoardColors.Blue("LEARN")}  a guided lesson: the board's colors, beatmatching and your first mix.\n" +

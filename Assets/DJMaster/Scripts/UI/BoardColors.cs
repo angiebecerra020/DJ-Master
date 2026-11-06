@@ -3,8 +3,8 @@ using UnityEngine;
 namespace DJMaster
 {
     // The board's color code. Every control family has one color, and Learn mode teaches it:
-    //   BLUE = Deck A (left)   PINK = Deck B (right)   GREEN = PLAY   ORANGE = CUE
-    //   YELLOW = headphones and FILTER (things only you hear / effects)   RED = TAP and AIR HORN (for the crowd)
+    //   BLUE = Deck A (left)   PINK = Deck B (right)   GREEN = PLAY   ORANGE = CUE and the hot cue pads
+    //   YELLOW = headphones and FILTER (things only you hear / effects)   RED = TAP and the sampler pads (for the crowd)
     public static class BoardColors
     {
         public static readonly Color DeckA = new Color(0.1f, 0.85f, 1f);
@@ -29,9 +29,10 @@ namespace DJMaster
         {
             if (string.IsNullOrEmpty(id)) return "";
             if (id.EndsWith(".play")) return "GREEN";
-            if (id.EndsWith(".cue")) return "ORANGE";
+            if (id.EndsWith(".cue") || id.Contains(".hotcue")) return "ORANGE";
+            if (id.Contains(".sampler") || id == "airhorn") return "RED";
             if (id.EndsWith(".filter") || id.EndsWith(".headphones")) return "YELLOW";
-            if (id == "tap" || id == "airhorn") return "RED";
+            if (id == "tap") return "RED";
             if (id.StartsWith("A.")) return "BLUE";
             if (id.StartsWith("B.")) return "PINK";
             return "";

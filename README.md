@@ -2,7 +2,8 @@
 
 Learn to DJ with just your hands. A mixed reality DJ school for Meta Quest.
 
-A full DJ controller appears on your real desk: two decks, a mixer, jog wheels, EQs, filters and a crossfader.
+A full two-deck DJ controller appears on your real desk: big jog wheels, round CUE and PLAY buttons, hot cue and sampler pads,
+tempo faders, and a mixer with EQs, filters, channel faders and a crossfader.
 Pick a mode, then pick where to play:
 
 | Mode | What you do |
@@ -42,9 +43,9 @@ Every control has a color, and Learn mode opens with a quick quiz on it:
 | Blue | Deck A (left) |
 | Pink | Deck B (right) |
 | Green | PLAY |
-| Orange | CUE (back to the first beat) |
+| Orange | CUE and the HOT CUE pads (jump to bar 1, 5, 9 or 13) |
 | Yellow | FILTER and PHONES: shaping the sound, and what only you hear |
-| Red | TAP and AIR HORN: for the crowd |
+| Red | TAP and the SAMPLER pads (horn, cheer, siren, zap): for the crowd |
 
 ## What you learn
 
@@ -83,7 +84,7 @@ bass clashes and silence. Your set is saved between sessions.
 
 | Control | Gesture |
 |---|---|
-| Buttons | Poke down from above. Brushing past from the side won't trigger them. |
+| Buttons and pads | Poke down from above. Brushing past from the side won't trigger them. |
 | Faders | Touch the cap and slide. The tempo fader is geared 1:3 for fine control and clicks into 0%. |
 | Knobs | Touch the top and slide your finger away/right to turn up, toward you/left to turn down. Double-tap to reset to center. |
 | Jog wheels | Rest a fingertip on the platter and spin: clockwise speeds the track up, counter-clockwise slows it. When paused, it scrubs. |

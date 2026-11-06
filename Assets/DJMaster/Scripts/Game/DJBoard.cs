@@ -11,6 +11,8 @@ namespace DJMaster
         public Fader tempo, volume;
         public Knob high, mid, low, filter;
         public JogWheel jog;
+        public PokeButton[] hotCues = new PokeButton[4];   // jump to bar 1, 5, 9, 13
+        public PokeButton[] samplers = new PokeButton[4];  // crowd sounds, see Sfx.SampleNames
     }
 
     // Connects the physical controls to the decks and mixer, and keeps button lights in sync.
@@ -19,7 +21,11 @@ namespace DJMaster
         public Mixer mixer;
         public DeckControls[] channels = new DeckControls[2];
         public Fader crossfader;
-        public PokeButton tap, airHorn;
+        public PokeButton tap;
+        [Tooltip("Deck A's HORN sampler pad, the one the lessons point at.")]
+        public PokeButton airHorn;
+
+        public event System.Action HornPressed; // either deck's HORN pad
 
         public DJControl[] AllControls { get; private set; }
 
@@ -37,8 +43,18 @@ namespace DJMaster
                 ch.cue.Pressed += ch.deck.Cue;
                 ch.load.Pressed += () => ch.deck.LoadNext(channels[1 - idx].deck.TrackIndex);
                 ch.headphones.Pressed += () => mixer.headphoneCue[idx] = !mixer.headphoneCue[idx];
+                for (int k = 0; k < ch.hotCues.Length; k++)
+                {
+                    int bar = k * 4;
+                    ch.hotCues[k].Pressed += () => ch.deck.HotCue(bar);
+                }
+                for (int k = 0; k < ch.samplers.Length; k++)
+                {
+                    int sample = k;
+                    ch.samplers[k].Pressed += () => Sfx.Sample(sample);
+                }
+                ch.samplers[0].Pressed += () => HornPressed?.Invoke();
             }
-            airHorn.Pressed += Sfx.AirHorn;
         }
 
         void Update()
@@ -57,6 +73,7 @@ namespace DJMaster
                 ch.cue.Lit = ch.deck.IsLoaded && !ch.deck.IsPlaying;
                 ch.load.Lit = ch.deck.IsLoading && Time.time % 0.4f < 0.2f;
                 ch.headphones.Lit = mixer.headphoneCue[i];
+                for (int k = 0; k < ch.hotCues.Length; k++) ch.hotCues[k].Lit = ch.deck.IsLoaded && ch.deck.Bar / 4 == k; // the phrase you're in
             }
             mixer.crossfader = crossfader.value;
             int dom = mixer.DominantDeck;

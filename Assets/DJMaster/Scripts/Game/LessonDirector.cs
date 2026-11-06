@@ -55,7 +55,7 @@ namespace DJMaster
         {
             BuildSteps();
             board.tap.Pressed += OnTap;
-            board.airHorn.Pressed += () => hornPressed = true;
+            board.HornPressed += () => hornPressed = true;
         }
 
         void OnEnable() => DJControl.AnyTouched += OnTouched;
@@ -198,16 +198,16 @@ namespace DJMaster
                 "YELLOW", "The yellow knobs are the lowest knob on each side of the mixer, labelled FILTER.",
                 "A.filter", "B.filter", "A.headphones", "B.headphones");
             Quiz("Colors: orange",
-                $"{orange} is CUE: it jumps a song back to its first beat. {green} is PLAY and {red} is for the crowd. Touch an {orange} button.",
-                "ORANGE", "CUE sits right next to PLAY, at the front of each deck.",
-                "A.cue", "B.cue");
+                $"{orange} is CUE: it jumps a song back to a starting point. The {orange} pads jump to bar 1, 5, 9 or 13. {green} is PLAY. Touch something {orange}.",
+                "ORANGE", "The big round CUE button is just above PLAY, at the front corner of each deck.",
+                "A.cue", "B.cue", "A.hotcue0", "A.hotcue1", "A.hotcue2", "A.hotcue3", "B.hotcue0", "B.hotcue1", "B.hotcue2", "B.hotcue3");
 
             // ---- Playing a track ----
             steps.Add(new Step
             {
                 title = "Welcome to the booth",
                 text = $"Now you know the colors. {green} means go! Tap the {green} PLAY button on {deckA} (the {blue} side) to start your first record.",
-                hint = "PLAY is at the front left of the board. Poke it with your fingertip.",
+                hint = "PLAY is the big round button at the front left corner of the board. Poke it with your fingertip.",
                 highlight = new[] { "A.play" },
                 done = () => A.IsPlaying,
                 praise = "It's playing!",
@@ -240,7 +240,7 @@ namespace DJMaster
             steps.Add(new Step
             {
                 title = "Feel the beat",
-                text = $"Dance music counts in fours: every kick drum is one beat. Tap the {red} TAP pad on each kick, four in a row.",
+                text = $"Dance music counts in fours: every kick drum is one beat. Tap the round {red} TAP button between the channel faders on each kick, four in a row.",
                 hint = "Tap exactly when you hear the boom of the kick. Nod your head to find it first.",
                 highlight = new[] { "tap" },
                 done = () => tapStreak >= 4,
@@ -263,7 +263,7 @@ namespace DJMaster
             {
                 title = "Load Deck B",
                 text = $"Time to pick the next record. Tap the {pink} LOAD button on {deckB}.",
-                hint = "LOAD is the small pink button above Deck B's jog wheel.",
+                hint = "LOAD is the small pink button just below Deck B's jog wheel, above the round CUE button.",
                 highlight = new[] { "B.load" },
                 done = () => B.IsLoaded,
             });
@@ -271,7 +271,7 @@ namespace DJMaster
             {
                 title = "Headphone cue",
                 text = $"DJs prepare the next song in their headphones. Tap {deckB}'s {yellow} PHONES button so only YOU can hear it.",
-                hint = "It's the yellow button under Deck B's knobs on the mixer.",
+                hint = "The two yellow PHONES buttons are at the top middle of the mixer. Press the B one.",
                 highlight = new[] { "B.headphones" },
                 done = () => mixer.headphoneCue[1],
             });
@@ -289,7 +289,7 @@ namespace DJMaster
             {
                 title = "Beatmatch: tempo",
                 text = $"{deckA} runs at 128 BPM but {deckB} is slower. Slide {deckB}'s TEMPO fader up until both BPM readouts match.",
-                hint = "The tempo fader is the long slider on the far right. Small moves! Watch the BPM difference shrink to 0.0.",
+                hint = "TEMPO is the long slider on the far right edge. Small moves! Watch the BPM difference shrink to 0.0.",
                 highlight = new[] { "B.tempo" },
                 done = () => B.IsPlaying && Mathf.Abs(B.BPM - A.BPM) < 0.35f,
                 hold = 1f,
@@ -360,7 +360,7 @@ namespace DJMaster
             steps.Add(new Step
             {
                 title = "Drop it!",
-                text = $"{red} is for the crowd. Every DJ needs a signature move: hit the {red} AIR HORN. Then try BUILD A SET to plan your own show!",
+                text = $"{red} is for the crowd: the {red} SAMPLER pads play sound effects. Every DJ needs a signature move: hit HORN. Then try BUILD A SET to plan your own show!",
                 highlight = new[] { "airhorn" },
                 done = () => hornPressed,
                 praise = "LESSON COMPLETE!",

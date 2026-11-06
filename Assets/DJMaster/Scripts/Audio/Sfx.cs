@@ -10,7 +10,7 @@ namespace DJMaster
         public AudioSource ambienceSource;   // looping crowd murmur, volume follows crowd energy
 
         static Sfx instance;
-        AudioClip click, success, fail, cheer, horn, murmur;
+        AudioClip click, success, fail, cheer, horn, siren, zap, murmur;
         const int SR = 44100;
 
         void Awake()
@@ -25,6 +25,17 @@ namespace DJMaster
             fail = Make("fail", 0.35f, t => Mathf.Sign(Mathf.Sin(2 * Mathf.PI * (180 - t * 120) * t)) * 0.12f * (1 - t / 0.35f));
             cheer = MakeCheer();
             horn = MakeHorn();
+            siren = Make("siren", 1.6f, t =>
+            {
+                float f = 700 + 450 * Mathf.Sin(2 * Mathf.PI * 3.2f * t);
+                return Mathf.Clamp(Mathf.Sin(2 * Mathf.PI * f * t) * 3f, -1, 1) * 0.22f * Mathf.Min(1, (1.6f - t) * 6);
+            });
+            zap = Make("zap", 0.75f, t =>
+            {
+                float local = t % 0.25f; // three "pew"s
+                float f = 2400 * Mathf.Exp(-local * 18) + 120;
+                return Mathf.Sign(Mathf.Sin(2 * Mathf.PI * f * local)) * Mathf.Exp(-local * 9) * 0.18f;
+            });
             murmur = MakeMurmur();
             if (ambienceSource != null)
             {
@@ -40,6 +51,18 @@ namespace DJMaster
         public static void Fail() => Play(instance?.fail, 0.6f, ui: true);
         public static void Cheer(float volume = 1f) => Play(instance?.cheer, volume, ui: false);
         public static void AirHorn() => Play(instance?.horn, 0.8f, ui: false);
+        public static void Siren() => Play(instance?.siren, 0.7f, ui: false);
+        public static void Zap() => Play(instance?.zap, 0.7f, ui: false);
+
+        // The sampler pads, left to right.
+        public static readonly string[] SampleNames = { "HORN", "CHEER", "SIREN", "ZAP" };
+        public static void Sample(int i)
+        {
+            if (i == 0) AirHorn();
+            else if (i == 1) Cheer(0.9f);
+            else if (i == 2) Siren();
+            else Zap();
+        }
 
         public static void SetAmbience(float volume)
         {
