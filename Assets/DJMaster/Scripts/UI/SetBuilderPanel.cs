@@ -9,7 +9,7 @@ namespace DJMaster
     {
         public PokeButton[] crateButtons = new PokeButton[8];
         public TextMesh[] crateLabels = new TextMesh[8];
-        public PokeButton[] styleButtons = new PokeButton[4];   // in TransitionStyle order
+        public PokeButton[] styleButtons = new PokeButton[6];   // in TransitionStyle order
         public TextMesh setText, info, status;
         public PokeButton back, undo, clear, goLive;
         [Tooltip("Plays each song as you add it.")]
@@ -53,7 +53,10 @@ namespace DJMaster
             string error = Set.Add(track, Style);
             if (error != null) { Say(error, true); return; }
             if (preview != null) { preview.Load(track); preview.Play(); }
-            Say(Set.Count == 1 ? "Opener locked in. Pick a transition, then the next song." : $"Added with a {SetList.Name(Style)}.", false);
+            string advice = Set.Count > 1 ? SetList.Advice(Set.songs[Set.Count - 2], track, Style) : null;
+            Say(advice != null ? BoardColors.Red(advice)
+                : Set.Count == 1 ? "Opener locked in. Pick a transition, then the next song."
+                : $"Added with a {SetList.Name(Style)}.", false);
             Changed();
         }
 
@@ -103,7 +106,12 @@ namespace DJMaster
             if (Set.Count == 0) sb.Append("<color=#8890A0>empty: tap a song\nin the crate</color>");
             for (int i = 0; i < Set.Count; i++)
             {
-                if (i > 0) sb.Append(BoardColors.Yellow($"  {SetList.Name(Set.transitions[i - 1])}")).Append('\n');
+                if (i > 0)
+                {
+                    bool risky = SetList.Advice(Set.songs[i - 1], Set.songs[i], Set.transitions[i - 1]) != null;
+                    string name = $"  {SetList.Name(Set.transitions[i - 1])}{(risky ? " !" : "")}";
+                    sb.Append(risky ? BoardColors.Red(name) : BoardColors.Yellow(name)).Append('\n');
+                }
                 sb.Append($"{i + 1} {tracks[Set.songs[i]].title}\n");
             }
             setText.text = sb.ToString();

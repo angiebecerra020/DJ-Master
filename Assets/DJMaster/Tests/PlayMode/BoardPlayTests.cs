@@ -122,8 +122,11 @@ namespace DJMaster.Tests
             Assert.AreEqual(GameMode.ChooseVenue, game.Mode);
             yield return new WaitForSeconds(0.3f);
             yield return Poke(panel.actionButtons[2]); // FESTIVAL
-            Assert.AreEqual(GameMode.Learn, game.Mode);
+            Assert.AreEqual(GameMode.ChooseLesson, game.Mode);
             Assert.AreEqual(EnvMode.Festival, env.Mode);
+            yield return new WaitForSeconds(0.3f);
+            yield return Poke(panel.actionButtons[0]); // 1 FIRST MIX
+            Assert.AreEqual(GameMode.Learn, game.Mode);
             Assert.AreEqual(0, lessons.StepIndex);
 
             // Wrong color: told what it was, no progress.

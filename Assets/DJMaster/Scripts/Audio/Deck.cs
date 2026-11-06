@@ -30,6 +30,12 @@ namespace DJMaster
         public int BeatInBar => (int)Beat % TrackSynth.BeatsPerBar;                         // 0-based
         public TrackSynth.Section Section => TrackSynth.SectionOfBar(Bar);
 
+        // LOOP repeats the current 4-bar phrase until it's switched off.
+        public const int LoopBeats = 16;
+        public bool Looping { get; private set; }
+        public int LoopRepeats { get; private set; }
+        double loopStart;
+
         public event Action<Deck> Loaded;
         public event Action<Deck, int> BeatTick; // fires on every whole beat while playing
 
@@ -55,6 +61,7 @@ namespace DJMaster
             clip = null;
             pendingPlay = false;
             lastWholeBeat = -1;
+            Looping = false;
             TrackIndex = ((index % TrackLibrary.Tracks.Length) + TrackLibrary.Tracks.Length) % TrackLibrary.Tracks.Length;
             TrackLibrary.Render(TrackIndex);
             TryFinishLoad();
@@ -105,6 +112,34 @@ namespace DJMaster
             Source.Pause();
             Source.timeSamples = 0;
             lastWholeBeat = -1;
+            Looping = false;
+        }
+
+        public void ToggleLoop()
+        {
+            if (!IsLoaded) return;
+            Looping = !Looping;
+            if (!Looping) return;
+            loopStart = (Bar / 4) * 4 * TrackSynth.BeatsPerBar;
+            LoopRepeats = 0;
+        }
+
+        // Moves the playhead to a beat position (wrapped to the track).
+        public void SeekBeat(double beat)
+        {
+            if (!IsLoaded) return;
+            long samples = (long)(beat * 60.0 / Track.bpm * clip.frequency) % clip.samples;
+            if (samples < 0) samples += clip.samples;
+            Source.timeSamples = (int)samples;
+        }
+
+        // SYNC, part 2: line this deck's position in the bar up with another deck, keeping its own bar.
+        public void AlignTo(Deck other)
+        {
+            if (!IsLoaded || !other.IsLoaded) return;
+            double bpb = TrackSynth.BeatsPerBar;
+            double barStart = Math.Floor(Beat / bpb) * bpb;
+            SeekBeat(barStart + other.Beat % bpb);
         }
 
         // Hot cue: jump to the start of a phrase (bar 0, 4, 8 or 12, shown as 1, 5, 9, 13). While playing, the jump keeps
@@ -112,9 +147,9 @@ namespace DJMaster
         public void HotCue(int bar)
         {
             if (!IsLoaded) return;
-            double beat = bar * TrackSynth.BeatsPerBar + (Source.isPlaying ? Beat % TrackSynth.BeatsPerBar : 0);
-            Source.timeSamples = (int)((long)(beat * 60.0 / Track.bpm * clip.frequency) % clip.samples);
+            SeekBeat(bar * TrackSynth.BeatsPerBar + (Source.isPlaying ? Beat % TrackSynth.BeatsPerBar : 0));
             lastWholeBeat = -1;
+            Looping = false;
         }
 
         // Jog wheel. Playing: temporary pitch bend from spin speed. Paused: scrub (1 revolution = 1 bar).
@@ -142,6 +177,15 @@ namespace DJMaster
             if (!IsLoaded) return;
 
             Source.pitch = Rate * (1f + jogBend);
+            Strip.echoSeconds = 0.75f * 60f / Mathf.Max(60f, BPM);
+
+            if (Looping && Source.isPlaying)
+            {
+                double beat = Beat, loopEnd = loopStart + LoopBeats;
+                // Jump back by exactly one loop length, so the beat never drifts.
+                if (beat >= loopEnd && beat < loopEnd + 2) { SeekBeat(beat - LoopBeats); LoopRepeats++; }
+                else if (loopEnd >= TrackSynth.TotalBeats && beat < 2 && loopStart > 0) { SeekBeat(beat + loopStart); LoopRepeats++; }
+            }
             jogBend = Mathf.MoveTowards(jogBend, 0, Time.deltaTime * 2f);
 
             if (Source.isPlaying)

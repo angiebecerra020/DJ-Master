@@ -36,6 +36,7 @@ namespace DJMaster.Tests
             var B = board.B.deck;
             panel.actionButtons[0].SimulatePress(); // LEARN
             panel.actionButtons[1].SimulatePress(); // CLUB
+            panel.actionButtons[0].SimulatePress(); // lesson 1
             yield return WaitFor(() => lessons.Running && A.IsLoaded, 20f, "lesson start");
 
             int step = 0;

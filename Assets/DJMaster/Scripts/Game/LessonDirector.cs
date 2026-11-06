@@ -4,8 +4,10 @@ using UnityEngine;
 
 namespace DJMaster
 {
-    // Learn mode. One guided session (about 7 minutes): first the board's color code, then from pressing PLAY
-    // to beatmatching and finishing a full transition, one control at a time.
+    // Learn mode: three short guided lessons, each one control at a time and well under 10 minutes.
+    //   1 FIRST MIX       the color code, the beat, phrases, and the three parts of a beatmix: tempo, beats, phrase
+    //   2 FADE & CUT      the DJ loop, plus two transitions that need no beatmatching
+    //   3 SYNC LOOPS FX   tap tempo, SYNC, a one-phrase beatmix, loops, and an echo out ("less is more")
     public class LessonDirector : MonoBehaviour
     {
         public DJBoard board;
@@ -25,12 +27,17 @@ namespace DJMaster
             public Action onTap;      // what the TAP pad does during this step
             public string[] answers;  // color quiz: touching any of these controls completes the step
             public string color;      // color quiz: the color being asked for
+            public Action tick;       // per-frame logic for steps that judge timing
         }
 
         public bool Running { get; private set; }
         public bool Finished { get; private set; }
         public int StepIndex { get; private set; }
         public int StepCount => steps.Count;
+        public int LessonIndex { get; private set; }
+        public static readonly string[] LessonNames = { "FIRST MIX", "FADE & CUT", "SYNC, LOOPS & FX" };
+        public static string DoneKey(int lesson) => lesson == 0 ? "lessonComplete" : $"lesson{lesson + 1}Complete";
+        public static bool IsDone(int lesson) => PlayerPrefs.GetInt(DoneKey(lesson), 0) == 1;
         public Step Current => Running && StepIndex < steps.Count ? steps[StepIndex] : null;
         public string Feedback { get; private set; } = "";
         public bool ShowingPraise => praiseTimer > 0;
@@ -38,7 +45,8 @@ namespace DJMaster
 
         public event Action Completed;
 
-        readonly List<Step> steps = new();
+        readonly List<Step>[] lessons = { new(), new(), new() };
+        List<Step> steps;
         float heldFor, stepTime, praiseTimer;
 
         // Step-local state
@@ -47,25 +55,42 @@ namespace DJMaster
         bool hornPressed;
         bool tapOnLine;
         bool quizHit;
+        bool hotCuePressed, wasPlaying, timingOk, heard, sawRepeat, tooFast;
+        float timer, together;
+        int taps, startTrack;
 
         Deck A => board.A.deck;
         Deck B => board.B.deck;
 
         void Awake()
         {
-            BuildSteps();
+            BuildFirstMix(lessons[0]);
+            BuildFadeAndCut(lessons[1]);
+            BuildSyncLoopsFx(lessons[2]);
+            steps = lessons[0];
             board.tap.Pressed += OnTap;
+            board.A.hotCues[0].Pressed += () => hotCuePressed = true;
             board.HornPressed += () => hornPressed = true;
         }
 
         void OnEnable() => DJControl.AnyTouched += OnTouched;
         void OnDisable() => DJControl.AnyTouched -= OnTouched;
 
-        public void Begin()
+        public void Begin(int lesson = 0)
         {
+            LessonIndex = Mathf.Clamp(lesson, 0, lessons.Length - 1);
+            steps = lessons[LessonIndex];
             board.ResetControls();
             A.Load(0);  // Neon Tides, 128 BPM house
-            B.Unload();
+            if (LessonIndex == 0) B.Unload();
+            else
+            {
+                // Lessons 2 and 3 start mid-set: a song already playing to the room.
+                A.Play();
+                board.A.volume.SetValue(1f);
+                board.crossfader.SetValue(0f);
+                B.Load(LessonIndex == 1 ? 3 : 4); // Sundial (122, too slow to beatmix) / Glass Arcade (126)
+            }
             Running = true;
             Finished = false;
             Goto(0);
@@ -89,6 +114,10 @@ namespace DJMaster
             StepIndex = i;
             heldFor = 0; stepTime = 0;
             tapStreak = 0; filterWentDown = false; hornPressed = false; tapOnLine = false; quizHit = false;
+            hotCuePressed = timingOk = heard = sawRepeat = tooFast = false;
+            wasPlaying = B.IsPlaying;
+            timer = together = 0; taps = 0;
+            startTrack = A.TrackIndex;
             Feedback = "";
             board.ClearHighlights();
             if (i >= steps.Count) { Finish(); return; }
@@ -105,7 +134,7 @@ namespace DJMaster
         {
             Running = false;
             Finished = true;
-            PlayerPrefs.SetInt("lessonComplete", 1);
+            PlayerPrefs.SetInt(DoneKey(LessonIndex), 1);
             PlayerPrefs.Save();
             Sfx.Cheer(1f);
             BeatBus.FireDrop();
@@ -128,6 +157,7 @@ namespace DJMaster
             if (s.answers != null && ShowHint)
                 foreach (var id in s.answers)
                     if (board.Find(id) is { } c) c.Highlighted = true;
+            s.tick?.Invoke();
             bool done = s.done();
             heldFor = done ? heldFor + Time.deltaTime : 0;
             if (done && heldFor >= s.hold)
@@ -142,6 +172,7 @@ namespace DJMaster
         void OnTap()
         {
             if (!Running || praiseTimer > 0 || !A.IsPlaying) return;
+            taps++;
             steps[StepIndex].onTap?.Invoke();
         }
 
@@ -173,7 +204,7 @@ namespace DJMaster
             Sfx.Fail();
         }
 
-        void BuildSteps()
+        void BuildFirstMix(List<Step> steps)
         {
             string blue = BoardColors.Blue("BLUE"), pink = BoardColors.Pink("PINK"), green = BoardColors.Green("GREEN"),
                 orange = BoardColors.Orange("ORANGE"), yellow = BoardColors.Yellow("YELLOW"), red = BoardColors.Red("RED");
@@ -287,8 +318,8 @@ namespace DJMaster
             // ---- Beatmatching ----
             steps.Add(new Step
             {
-                title = "Beatmatch: tempo",
-                text = $"{deckA} runs at 128 BPM but {deckB} is slower. Slide {deckB}'s TEMPO fader up until both BPM readouts match.",
+                title = "Beatmix part 1: tempo",
+                text = $"A beatmix has three parts: tempo, beats and phrase. Part 1: {deckA} runs at 128 BPM but {deckB} is slower. Slide {deckB}'s TEMPO fader up until both BPM readouts match.",
                 hint = "TEMPO is the long slider on the far right edge. Small moves! Watch the BPM difference shrink to 0.0.",
                 highlight = new[] { "B.tempo" },
                 done = () => B.IsPlaying && Mathf.Abs(B.BPM - A.BPM) < 0.35f,
@@ -297,7 +328,7 @@ namespace DJMaster
             });
             steps.Add(new Step
             {
-                title = "Beatmatch: line up the kicks",
+                title = "Beatmix part 2: the beats",
                 text = $"Same speed, but the kicks don't land together. Spin {deckB}'s {pink} jog wheel to nudge it until the SYNC light turns green and both platter markers point the same way.",
                 hint = "Spin clockwise to catch up, counter-clockwise to hold back. Short gentle spins.",
                 highlight = new[] { "B.jog" },
@@ -317,8 +348,8 @@ namespace DJMaster
             });
             steps.Add(new Step
             {
-                title = "Bring it in",
-                text = $"Raise {deckB}'s channel fader all the way, then slide the crossfader to the middle. Now the crowd hears both songs.",
+                title = "Beatmix part 3: the phrase",
+                text = $"Bring {deckB} in on a phrase line (bar 1, 5, 9 or 13): raise its channel fader all the way and slide the crossfader to the middle. Now the crowd hears both songs.",
                 highlight = new[] { "B.volume", "crossfader" },
                 done = () => board.B.volume.value > 0.85f && board.crossfader.value > 0.35f && board.crossfader.value < 0.65f,
                 enter = () => mixer.headphoneCue[1] = false,
@@ -366,5 +397,287 @@ namespace DJMaster
                 praise = "LESSON COMPLETE!",
             });
         }
+
+        // A phrase line on a deck: within about half a beat of bar 1, 5, 9 or 13. Returns the bar (1-based) for feedback.
+        static bool OnPhrase(Deck d, out int bar, out bool onBar)
+        {
+            double b = d.Beat / TrackSynth.BeatsPerBar;
+            int nearest = (int)Math.Round(b);
+            bar = nearest % TrackSynth.Bars + 1;
+            onBar = DJMath.DistanceToBeat(b) < 0.15f;
+            return onBar && nearest % 4 == 0;
+        }
+
+        bool XfMiddle => board.crossfader.value > 0.3f && board.crossfader.value < 0.7f;
+
+        // Lesson 2: the DJ loop, the FADE and the CUT. Deck A plays Neon Tides (128); Deck B has Sundial (122) loaded.
+        void BuildFadeAndCut(List<Step> steps)
+        {
+            string deckA = BoardColors.Blue("Deck A"), deckB = BoardColors.Pink("Deck B");
+            string phones = BoardColors.Yellow("PHONES"), play = BoardColors.Green("PLAY"), cue = BoardColors.Orange("CUE");
+
+            steps.Add(new Step
+            {
+                title = "The DJ loop",
+                text = $"Every DJ repeats one loop: load the next song, preview it in your headphones, bring it in, perform the transition, stop the old song. {deckB} is loaded. Tap its {phones} button.",
+                highlight = new[] { "B.headphones" },
+                done = () => mixer.headphoneCue[1],
+            });
+            steps.Add(new Step
+            {
+                title = "Preview",
+                text = $"Press {play} on {deckB}. Only you hear it, in your headphones. It's 122 BPM, much slower than {deckA}: too far apart to beatmix. Today's transitions don't need beatmatching.",
+                highlight = new[] { "B.play" },
+                done = () => B.IsPlaying,
+                praise = "That's previewing.",
+            });
+            steps.Add(new Step
+            {
+                title = "Ready at bar 1",
+                text = $"Press {deckB}'s {cue}: it jumps back to bar 1 and waits there, ready to start on a phrase.",
+                highlight = new[] { "B.cue" },
+                done = () => !B.IsPlaying && B.Beat < 0.05,
+            });
+
+            // ---- The fade ----
+            steps.Add(new Step
+            {
+                title = "The fade: set up",
+                text = $"A FADE works between any two songs, even different speeds. Slide the crossfader to the middle, then raise {deckB}'s channel fader. {deckB} is paused, so it stays silent.",
+                highlight = new[] { "crossfader", "B.volume" },
+                done = () => XfMiddle && board.B.volume.value > 0.85f,
+                enter = () => mixer.headphoneCue[1] = false,
+            });
+            steps.Add(new Step
+            {
+                title = "The fade: the dip",
+                text = $"Pull {deckA}'s fader down sharply, to about two thirds. A clear dip tells the dance floor a fade is starting. A timid fade just sounds like a mistake.",
+                highlight = new[] { "A.volume" },
+                done = () => board.A.volume.value < 0.7f,
+            });
+            steps.Add(new Step
+            {
+                title = "The fade: slowly",
+                text = $"Now keep fading {deckA} down slowly, over about 10 seconds.",
+                hint = "Move the fader a little at a time. Count to ten as you go.",
+                highlight = new[] { "A.volume" },
+                enter = () => timer = 0,
+                tick = () =>
+                {
+                    timer += Time.deltaTime;
+                    float v = board.A.volume.value;
+                    if (!tooFast && v < 0.12f && timer < 6f)
+                    {
+                        tooFast = true;
+                        Feedback = "Too fast! Push it back up to about two thirds and fade slower.";
+                        Sfx.Fail();
+                    }
+                    else if (tooFast && v > 0.6f) { tooFast = false; timer = 0; }
+                    if (!tooFast) Feedback = $"Fading... {timer:0} s";
+                },
+                done = () => !tooFast && board.A.volume.value < 0.12f && timer >= 6f,
+            });
+            steps.Add(new Step
+            {
+                title = "The fade: drop the new song",
+                text = $"As {deckA} disappears, start {deckB} on a phrase: press its {play} right as {deckA}'s bar counter hits 1, 5, 9 or 13.",
+                hint = "Watch Deck A's screen and count along: 1-2-3-4, 2-2-3-4... Press PLAY on the next 1.",
+                highlight = new[] { "B.play" },
+                tick = () =>
+                {
+                    if (B.IsPlaying && !wasPlaying && !timingOk)
+                    {
+                        if (OnPhrase(A, out int bar, out bool onBar)) timingOk = true;
+                        else
+                        {
+                            Feedback = onBar ? $"That was bar {bar}. Wait for bar 1, 5, 9 or 13." : "Not on the bar line. Count along with Deck A's beats.";
+                            Sfx.Fail();
+                            B.Cue();
+                        }
+                    }
+                    wasPlaying = B.IsPlaying;
+                },
+                done = () => timingOk,
+                praise = "Smooth fade!",
+            });
+            steps.Add(new Step
+            {
+                title = "Stop the old song",
+                text = $"Last part of the DJ loop: pull {deckA}'s fader to zero and press its {play} to stop it. Now {deckA} is free for the next song.",
+                highlight = new[] { "A.volume", "A.play" },
+                done = () => board.A.volume.value < 0.05f && !A.IsPlaying,
+            });
+
+            // ---- The cut ----
+            steps.Add(new Step
+            {
+                title = "The cut: load",
+                text = $"A CUT is an instant switch, exactly on the beat. Load a new song: tap {deckA}'s {BoardColors.Blue("LOAD")}.",
+                highlight = new[] { "A.load" },
+                done = () => A.IsLoaded && A.TrackIndex != startTrack,
+            });
+            steps.Add(new Step
+            {
+                title = "The cut: set up",
+                text = $"Slide the crossfader all the way to {deckB}, then raise {deckA}'s fader. The crossfader keeps {deckA} silent until the moment you cut.",
+                highlight = new[] { "crossfader", "A.volume" },
+                done = () => board.crossfader.value > 0.92f && board.A.volume.value > 0.85f,
+            });
+            steps.Add(new Step
+            {
+                title = "The cut: hot cue",
+                text = $"Tap {deckA}'s {BoardColors.Orange("HOT CUE 1")} pad. Hot cues are saved starting points: this one waits at bar 1.",
+                highlight = new[] { "A.hotcue0" },
+                done = () => hotCuePressed,
+            });
+            steps.Add(new Step
+            {
+                title = "Cut!",
+                text = $"Watch {deckB}'s bar counter. Right on bar 1, 5, 9 or 13: press {play} on {deckA} AND slam the crossfader to {deckA}, at the same moment.",
+                hint = "Rest one finger on Deck A's PLAY and another on the crossfader. Count 1-2-3-4 along with Deck B, then go on the 1.",
+                highlight = new[] { "A.play", "crossfader" },
+                tick = () =>
+                {
+                    float gA = mixer.CrowdGain(0), gB = mixer.CrowdGain(1);
+                    if (gA > 0.15f && !heard)
+                    {
+                        heard = true;
+                        timingOk = OnPhrase(B, out _, out _);
+                    }
+                    if (gA > 0.15f && gB > 0.15f) together += Time.deltaTime;
+                    bool switched = mixer.DominantDeck == 0 && gB < 0.05f;
+                    bool late = A.IsPlaying && !heard && A.Beat > TrackSynth.BeatsPerBar; // played but never cut across
+                    if (switched && timingOk && together < 0.75f) { quizHit = true; return; }
+                    if (switched || late)
+                    {
+                        Feedback = late ? "Slam the crossfader at the same moment as PLAY!"
+                            : !timingOk ? "Not on a phrase line. Wait for bar 1, 5, 9 or 13 on Deck B."
+                            : "Too slow: a cut has no overlap. Slam the crossfader in one move.";
+                        Sfx.Fail();
+                        A.Cue();
+                        board.crossfader.SetValue(1f);
+                        heard = timingOk = false;
+                        together = 0;
+                    }
+                },
+                done = () => quizHit,
+                praise = "Perfect cut!",
+            });
+            steps.Add(new Step
+            {
+                title = "Stop the old song",
+                text = $"Press {play} on {deckB} to stop it. That's the whole DJ loop: load, preview, bring in, transition, stop.",
+                highlight = new[] { "B.play" },
+                done = () => !B.IsPlaying,
+                praise = "LESSON COMPLETE!",
+            });
+        }
+
+        // Lesson 3: tap tempo, SYNC, the one-phrase beatmix, loops and effects.
+        // Deck A plays Neon Tides (128); Deck B has Glass Arcade (126) loaded.
+        void BuildSyncLoopsFx(List<Step> steps)
+        {
+            string deckA = BoardColors.Blue("Deck A"), deckB = BoardColors.Pink("Deck B");
+            string phones = BoardColors.Yellow("PHONES"), play = BoardColors.Green("PLAY");
+
+            steps.Add(new Step
+            {
+                title = "Tap the tempo",
+                text = $"DJs find a song's BPM by tapping along. Tap the {BoardColors.Red("TAP")} button on every kick drum, and keep going until your BPM shows up.",
+                hint = "Steady taps, one per boom. Nod your head first to find the beat.",
+                highlight = new[] { "tap" },
+                tick = () => { if (board.TapBpm > 0) Feedback = $"You're tapping {board.TapBpm:0.0} BPM. The song is {A.BPM:0}."; },
+                done = () => taps >= 4 && Mathf.Abs(board.TapBpm - A.BPM) < 2.5f,
+                praise = "Spot on!",
+            });
+            steps.Add(new Step
+            {
+                title = "Preview the next song",
+                text = $"Tap {deckB}'s {phones}, then its {play}, to hear it in your headphones.",
+                highlight = new[] { "B.headphones", "B.play" },
+                done = () => mixer.headphoneCue[1] && B.IsPlaying,
+            });
+            steps.Add(new Step
+            {
+                title = "SYNC",
+                text = $"{deckB} is 126 BPM, {deckA} is 128. SYNC matches the tempo AND lines up the beats in one press. Press {deckB}'s SYNC. (Pros learn by hand first, like in lesson 1: SYNC can be fooled by songs with a wobbly tempo.)",
+                highlight = new[] { "B.sync" },
+                done = () => judge.InSync,
+                hold = 0.5f,
+                praise = "Synced!",
+            });
+            steps.Add(new Step
+            {
+                title = "One-phrase beatmix",
+                text = $"On a phrase line (bar 1, 5, 9 or 13), raise {deckB}'s channel fader and slide the crossfader to the middle.",
+                highlight = new[] { "B.volume", "crossfader" },
+                done = () => board.B.volume.value > 0.85f && XfMiddle,
+                enter = () => mixer.headphoneCue[1] = false,
+            });
+            steps.Add(new Step
+            {
+                title = "Ride it for 8 bars",
+                text = "Let both songs play together for one phrase, about 8 bars. Mix over the drums, and don't go much longer: two kick drums for ages gets muddy.",
+                tick = () =>
+                {
+                    if (mixer.CrowdGain(0) > 0.15f && mixer.CrowdGain(1) > 0.15f && judge.InSync) together += Time.deltaTime;
+                    Feedback = $"Together: bar {Mathf.Min(8, Bars(together) + 1):0} of 8";
+                },
+                done = () => Bars(together) >= 7.5f,
+                praise = "That's a phrase.",
+            });
+            steps.Add(new Step
+            {
+                title = "Finish the mix",
+                text = $"Slide the crossfader all the way to {deckB}, then stop {deckA} with its {play}.",
+                highlight = new[] { "crossfader", "A.play" },
+                done = () => board.crossfader.value > 0.92f && !A.IsPlaying,
+            });
+            steps.Add(new Step
+            {
+                title = "Loops",
+                text = $"A LOOP repeats the current 4-bar phrase, to stretch an intro or outro while you get ready. Press {deckB}'s {BoardColors.Orange("LOOP")}.",
+                highlight = new[] { "B.loop" },
+                done = () => B.Looping,
+            });
+            steps.Add(new Step
+            {
+                title = "Let it repeat",
+                text = $"Watch the bar counter jump back. Once the phrase has repeated, press {BoardColors.Orange("LOOP")} again so the song carries on. Use loops for moments: too many make a set boring.",
+                highlight = new[] { "B.loop" },
+                tick = () =>
+                {
+                    if (B.Looping && B.LoopRepeats >= 1) sawRepeat = true;
+                    if (!B.Looping && !sawRepeat) Feedback = "Wait for it to repeat once first. Press LOOP again.";
+                    else if (sawRepeat && B.Looping) Feedback = "It repeated! Now press LOOP to release it.";
+                },
+                done = () => sawRepeat && !B.Looping,
+            });
+            steps.Add(new Step
+            {
+                title = "Effects: ECHO",
+                text = $"Effects are seasoning. Turn on {deckB}'s {BoardColors.Yellow("ECHO")} and listen to the repeats.",
+                highlight = new[] { "B.echo" },
+                done = () => B.Strip.echo,
+            });
+            steps.Add(new Step
+            {
+                title = "Echo out",
+                text = $"An ECHO OUT ends a song in style: with ECHO on, pull {deckB}'s fader all the way down on a phrase line. The echoes ring on after the music stops.",
+                highlight = new[] { "B.volume" },
+                done = () => B.Strip.echo && board.B.volume.value < 0.05f,
+                praise = "Echo out!",
+            });
+            steps.Add(new Step
+            {
+                title = "Less is more",
+                text = $"Turn the {BoardColors.Yellow("ECHO")} off and bring {deckB}'s fader back up. The rule pros follow: less is more. Effects should add to the music, never cover it.",
+                highlight = new[] { "B.echo", "B.volume" },
+                done = () => !B.Strip.echo && board.B.volume.value > 0.85f,
+                praise = "LESSON COMPLETE!",
+            });
+        }
+
+        float Bars(float seconds) => seconds * Mathf.Max(60f, A.BPM) / 60f / TrackSynth.BeatsPerBar;
     }
 }

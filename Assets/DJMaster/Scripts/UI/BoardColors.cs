@@ -29,7 +29,8 @@ namespace DJMaster
         {
             if (string.IsNullOrEmpty(id)) return "";
             if (id.EndsWith(".play")) return "GREEN";
-            if (id.EndsWith(".cue") || id.Contains(".hotcue")) return "ORANGE";
+            if (id.EndsWith(".cue") || id.Contains(".hotcue") || id.EndsWith(".loop")) return "ORANGE";
+            if (id.EndsWith(".echo")) return "YELLOW";
             if (id.Contains(".sampler") || id == "airhorn") return "RED";
             if (id.EndsWith(".filter") || id.EndsWith(".headphones")) return "YELLOW";
             if (id == "tap") return "RED";

@@ -101,12 +101,14 @@ namespace DJMaster.EditorTools
             var lessons = directors.AddComponent<LessonDirector>();
             lessons.board = board; lessons.mixer = mixer; lessons.judge = judge;
 
+            var recorder = cam.gameObject.AddComponent<MixRecorder>();
+            recorder.replay = AudioChild("Replay", audioRoot);
             var performer = directors.AddComponent<SetPerformer>();
-            performer.board = board; performer.mixer = mixer; performer.judge = judge;
+            performer.board = board; performer.mixer = mixer; performer.judge = judge; performer.recorder = recorder;
 
             var game = directors.AddComponent<GameDirector>();
             game.board = board; game.mixer = mixer; game.judge = judge; game.lessons = lessons;
-            game.performer = performer; game.builder = builder;
+            game.performer = performer; game.builder = builder; game.recorder = recorder;
             game.panel = panel; game.environment = env; game.anchor = anchor;
             game.roomButton = roomBtn; game.clubButton = clubBtn; game.festivalButton = festBtn;
             game.recenterButton = recenterBtn; game.raiseButton = upBtn; game.lowerButton = downBtn;
@@ -185,6 +187,8 @@ namespace DJMaster.EditorTools
                 Label(t, p, new Vector3(ox + 0.095f, 0.001f, 0.2f), 0.0034f, color);
 
                 ch.load = MakeButton($"{p}.load", "LOAD", t, new Vector3(ox - 0.08f, 0.008f, -0.027f), new Vector2(0.034f, 0.018f), capMat, color);
+                ch.sync = MakeButton($"{p}.sync", "SYNC", t, new Vector3(ox - 0.035f, 0.008f, -0.027f), new Vector2(0.034f, 0.018f), capMat, color);
+                ch.loop = MakeButton($"{p}.loop", "LOOP", t, new Vector3(ox + 0.01f, 0.008f, -0.027f), new Vector2(0.034f, 0.018f), capMat, BoardColors.Cue);
                 ch.cue = MakeButton($"{p}.cue", "CUE", t, new Vector3(ox - 0.08f, 0.01f, -0.075f), new Vector2(0.038f, 0.038f), capMat, BoardColors.Cue, round: true);
                 ch.play = MakeButton($"{p}.play", "PLAY", t, new Vector3(ox - 0.08f, 0.01f, -0.15f), new Vector2(0.038f, 0.038f), capMat, BoardColors.Play, round: true);
 
@@ -222,6 +226,7 @@ namespace DJMaster.EditorTools
                 Label(t, "LOW", new Vector3(labelX, 0.001f, 0.125f), 0.001f, LabelColor);
                 Label(t, "FILTER", new Vector3(labelX, 0.001f, 0.075f), 0.0009f, LabelColor);
                 ch.headphones = MakeButton($"{p}.headphones", p, t, new Vector3(side * 0.017f, 0.008f, 0.16f), new Vector2(0.024f, 0.018f), capMat, BoardColors.Fx);
+                ch.echo = MakeButton($"{p}.echo", "ECHO", t, new Vector3(mx, 0.008f, 0.033f), new Vector2(0.03f, 0.016f), capMat, BoardColors.Fx);
                 ch.volume = MakeFader($"{p}.volume", "", t, new Vector3(mx, 0f, -0.075f), 0.085f, false, slotMat, capMat, 0f);
                 Label(t, p, new Vector3(mx, 0.001f, -0.133f), 0.0018f, color);
 
@@ -471,14 +476,14 @@ namespace DJMaster.EditorTools
                 var pos = new Vector3(i % 2 == 0 ? -0.232f : -0.088f, 0.065f - (i / 2) * 0.04f, -0.004f);
                 p.crateButtons[i] = Btn($"crate.{i}", pos, new Vector2(0.136f, 0.034f), DeckAColor, 0.0011f, out p.crateLabels[i]);
             }
-            string[] styles = { "BLEND", "BASS SWAP", "FILTER", "QUICK CUT" };
-            for (int i = 0; i < 4; i++)
+            string[] styles = { "PHRASE MIX", "BASS SWAP", "FILTER MIX", "QUICK CUT", "FADE", "ECHO OUT" };
+            for (int i = 0; i < styles.Length; i++)
             {
                 var pos = new Vector3(i % 2 == 0 ? 0.04f : 0.122f, 0.065f - (i / 2) * 0.04f, -0.004f);
                 p.styleButtons[i] = Btn($"style.{i}", pos, new Vector2(0.076f, 0.034f), BoardColors.Fx, 0.00105f, out var label);
                 label.text = styles[i];
             }
-            p.info = Text("Info", t, new Vector3(0.003f, 0.0f, 0), 0.001f, TextAnchor.UpperLeft, LabelColor);
+            p.info = Text("Info", t, new Vector3(0.003f, -0.04f, 0), 0.0009f, TextAnchor.UpperLeft, LabelColor);
             p.setText = Text("SetList", t, new Vector3(0.175f, 0.09f, 0), 0.00115f, TextAnchor.UpperLeft, Color.white);
             p.status = Text("Status", t, new Vector3(-0.3f, -0.09f, 0), 0.0012f, TextAnchor.MiddleLeft, new Color(0.3f, 1f, 0.5f));
 

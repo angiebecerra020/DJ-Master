@@ -54,5 +54,25 @@ namespace DJMaster.Tests
             Assert.AreEqual(0, SetList.Parse("").Count);
             Assert.AreEqual(0, SetList.Parse("garbage|x").Count);
         }
+
+        [Test]
+        public void AdvisesAgainstBeatmixingBigTempoGaps()
+        {
+            // Neon Tides 128 > Sundial 122 is about 5%: fine to fade or cut, too far to beatmix.
+            Assert.IsNotNull(SetList.Advice(0, 3, TransitionStyle.Blend));
+            Assert.IsNull(SetList.Advice(0, 3, TransitionStyle.Fade));
+            Assert.IsNull(SetList.Advice(0, 3, TransitionStyle.Cut));
+            Assert.IsNull(SetList.Advice(0, 1, TransitionStyle.BassSwap)); // 128 > 124 is about 3%
+        }
+
+        [Test]
+        public void NewStylesSurviveSaveAndLoad()
+        {
+            var set = new SetList();
+            set.Add(0, TransitionStyle.Blend);
+            set.Add(3, TransitionStyle.Fade);
+            set.Add(5, TransitionStyle.EchoOut);
+            CollectionAssert.AreEqual(set.transitions, SetList.Parse(set.Serialize()).transitions);
+        }
     }
 }

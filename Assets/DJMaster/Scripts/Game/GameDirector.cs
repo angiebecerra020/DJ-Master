@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace DJMaster
 {
-    public enum GameMode { Title, ChooseVenue, Learn, Build, Live, LiveResults, Freestyle }
+    public enum GameMode { Title, ChooseVenue, ChooseLesson, Learn, Build, Live, LiveResults, Freestyle }
 
     // Top-level flow: pick a mode (Learn / Build a set / Freestyle), then pick where to play
     // (your room, a club or a festival). Also wires up the scene and comfort buttons.
@@ -13,6 +13,7 @@ namespace DJMaster
         public MixJudge judge;
         public LessonDirector lessons;
         public SetPerformer performer;
+        public MixRecorder recorder;
         public InstructionPanel panel;
         public SetBuilderPanel builder;
         public EnvironmentManager environment;
@@ -24,6 +25,7 @@ namespace DJMaster
 
         bool paused;
         float lastScore;
+        int replayIndex;
 
         void Start()
         {
@@ -40,7 +42,7 @@ namespace DJMaster
             recenterButton.Pressed += anchor.Recenter;
             raiseButton.Pressed += () => anchor.AdjustHeight(0.02f);
             lowerButton.Pressed += () => anchor.AdjustHeight(-0.02f);
-            lessons.Completed += EnterTitle;
+            lessons.Completed += ChooseLesson;
             performer.Completed += ShowResults;
             builder.BackPressed += EnterTitle;
             builder.GoLivePressed += StartLive;
@@ -88,6 +90,13 @@ namespace DJMaster
             panel.SetActions("MY ROOM", "CLUB", "FESTIVAL", "BACK");
         }
 
+        void ChooseLesson()
+        {
+            lessons.Stop();
+            SetMode(GameMode.ChooseLesson);
+            panel.SetActions("1 FIRST MIX", "2 FADE & CUT", "3 SYNC & FX", "MENU");
+        }
+
         void Action(int i)
         {
             switch (Mode)
@@ -98,14 +107,18 @@ namespace DJMaster
                 case GameMode.ChooseVenue:
                     if (i == 3) { EnterTitle(); break; }
                     environment.SetMode(i == 0 ? EnvMode.Room : i == 1 ? EnvMode.Club : EnvMode.Festival);
-                    if (ChosenMode == GameMode.Learn) StartLearn();
+                    if (ChosenMode == GameMode.Learn) ChooseLesson();
                     else if (ChosenMode == GameMode.Build) StartBuild();
                     else StartFreestyle();
                     break;
+                case GameMode.ChooseLesson:
+                    if (i == 3) EnterTitle();
+                    else StartLearn(i);
+                    break;
                 case GameMode.Learn:
-                    if (i == 0) EnterTitle();
+                    if (i == 0) ChooseLesson();
                     else if (i == 1) lessons.Skip();
-                    else StartLearn();
+                    else StartLearn(lessons.LessonIndex);
                     break;
                 case GameMode.Live:
                     if (i == 0) EnterTitle();
@@ -113,10 +126,11 @@ namespace DJMaster
                     else performer.Finish();
                     break;
                 case GameMode.LiveResults:
+                    if (i != 3) recorder.StopReplay();
                     if (i == 0) EnterTitle();
                     else if (i == 1) StartLive();
                     else if (i == 2) StartBuild();
-                    else StartFreestyle();
+                    else ListenBack();
                     break;
                 case GameMode.Freestyle:
                     EnterTitle();
@@ -124,13 +138,32 @@ namespace DJMaster
             }
         }
 
-        void StartLearn()
+        void StartLearn(int lesson)
         {
             performer.Stop();
             SetMode(GameMode.Learn);
-            panel.SetActions("MENU", "SKIP STEP", "RESTART");
-            lessons.Begin();
+            panel.SetActions("LESSONS", "SKIP STEP", "RESTART");
+            lessons.Begin(lesson);
         }
+
+        // Replays each recorded transition in turn, with the decks paused so you hear only the recording.
+        void ListenBack()
+        {
+            var results = performer.Results;
+            for (int tries = 0; tries < results.Count; tries++)
+            {
+                var r = results[replayIndex++ % results.Count];
+                if (r.recording == null) continue;
+                board.A.deck.Pause();
+                board.B.deck.Pause();
+                recorder.Play(r.recording);
+                replaying = $"Listening back: {SetList.Name(r.style)} into {Title(r.to)}";
+                return;
+            }
+            replaying = "No recordings yet.";
+        }
+
+        string replaying = "";
 
         void StartBuild()
         {
@@ -169,7 +202,9 @@ namespace DJMaster
             if (lastScore > PlayerPrefs.GetInt("bestSet", 0)) { PlayerPrefs.SetInt("bestSet", (int)lastScore); PlayerPrefs.Save(); }
             Sfx.Cheer(1f);
             BeatBus.FireDrop();
-            panel.SetActions("MENU", "PLAY AGAIN", "EDIT SET", "FREESTYLE");
+            replayIndex = 0;
+            replaying = "";
+            panel.SetActions("MENU", "PLAY AGAIN", "EDIT SET", "LISTEN BACK");
         }
 
         void Update()
@@ -189,10 +224,10 @@ namespace DJMaster
                     int best = PlayerPrefs.GetInt("bestSet", 0);
                     panel.Show("DJ MASTER",
                         "Choose a mode:\n" +
-                        $"{BoardColors.Blue("LEARN")}  a guided lesson: the board's colors, beatmatching and your first mix.\n" +
+                        $"{BoardColors.Blue("LEARN")}  three short lessons: your first mix, fades and cuts, sync, loops and FX.\n" +
                         $"{BoardColors.Pink("BUILD A SET")}  pick songs and transitions, then perform them live.\n" +
                         $"{BoardColors.Yellow("FREESTYLE")}  just play, no rules.",
-                        best > 0 ? $"Best live set: {best} pts" : schooled ? "" : "New to DJing? Start with LEARN (about 7 minutes).");
+                        best > 0 ? $"Best live set: {best} pts" : schooled ? "" : "New to DJing? Start with LEARN, lesson 1 (about 7 minutes).");
                     break;
 
                 case GameMode.ChooseVenue:
@@ -204,12 +239,21 @@ namespace DJMaster
                         $"Mode: {what}.  You can switch anytime with the SCENE panel on your left.");
                     break;
 
+                case GameMode.ChooseLesson:
+                    string Line(int n, string what) => $"{(LessonDirector.IsDone(n) ? BoardColors.Green("DONE ") : "")}{n + 1}  {LessonDirector.LessonNames[n]}: {what}";
+                    panel.Show("LEARN: PICK A LESSON",
+                        Line(0, "the color code, the beat, and your first beatmix (7 min)") + "\n" +
+                        Line(1, "the DJ loop, fades and cuts. No beatmatching needed (4 min)") + "\n" +
+                        Line(2, "tap tempo, SYNC, an 8-bar mix, loops and echo (5 min)"),
+                        "New? Start with lesson 1.");
+                    break;
+
                 case GameMode.Learn:
                     var s = lessons.Current;
                     if (s == null) break;
                     string body = s.text;
                     if (lessons.ShowHint && !string.IsNullOrEmpty(s.hint)) body += "\n\nHINT: " + s.hint;
-                    panel.Show($"{lessons.StepIndex + 1}/{lessons.StepCount}  {s.title.ToUpper()}", body, "", lessons.Feedback);
+                    panel.Show($"LESSON {lessons.LessonIndex + 1}  {lessons.StepIndex + 1}/{lessons.StepCount}  {s.title.ToUpper()}", body, "", lessons.Feedback);
                     break;
 
                 case GameMode.Live:
@@ -236,18 +280,22 @@ namespace DJMaster
                     foreach (var r in results)
                     {
                         string grade = r.grade == SetPerformer.Grade.Perfect ? BoardColors.Green("PERFECT") : r.grade == SetPerformer.Grade.Good ? BoardColors.Yellow("GOOD") : BoardColors.Red("ROUGH");
-                        sb.Append($"{SetList.Name(r.style)} into {Title(r.to)}: {grade}. {r.note}\n");
+                        sb.Append($"{SetList.Name(r.style)}: {grade}. {r.note}\n");
                     }
                     if (results.Count < performer.Set.Count - 1) sb.Append("You ended the set early.\n");
-                    panel.Show("SET COMPLETE!", sb.ToString().TrimEnd(),
-                        $"Score {lastScore:0}   Best {PlayerPrefs.GetInt("bestSet", 0)} pts",
+                    var c = performer.Review;
+                    sb.Append($"LISTEN BACK: beats in sync {c.syncPercent:0}% of mix time, {c.clashSeconds:0} s of clashing, {c.deadAirSeconds:0} s of silence.\n");
+                    sb.Append($"PRACTISE NEXT: {c.practise}");
+                    bool listening = recorder.Replaying;
+                    panel.Show("SET COMPLETE!", sb.ToString(),
+                        listening ? replaying : $"Score {lastScore:0}   Best {PlayerPrefs.GetInt("bestSet", 0)} pts",
                         new string('*', stars) + new string('-', 3 - stars));
                     break;
 
                 case GameMode.Freestyle:
                     panel.Show("FREESTYLE",
-                        judge.Warning != "" ? judge.Warning : "No timer, no rules. LOAD tracks, mix between the decks, try bass drops (cut the LOW, slam it back on bar 1) and filter sweeps.",
-                        $"Crowd {(int)(BeatBus.Energy * 100)}%", judge.Shoutout);
+                        judge.Warning != "" ? judge.Warning : "No timer, no rules. LOAD songs, mix with any transition, try bass drops (cut the LOW, slam it back on bar 1), LOOPs and ECHO. Remember: less is more.",
+                        $"Crowd {(int)(BeatBus.Energy * 100)}%{(board.TapBpm > 0 ? $"   Tapped {board.TapBpm:0.0} BPM" : "")}", board.SyncMessage != "" ? board.SyncMessage : judge.Shoutout);
                     break;
             }
         }

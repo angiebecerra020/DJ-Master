@@ -8,8 +8,8 @@ Pick a mode, then pick where to play:
 
 | Mode | What you do |
 |---|---|
-| **Learn** | A guided lesson (about 7 minutes): the board's color code, then from pressing PLAY to your first beatmatched transition. |
-| **Build a set** | Choose 2-5 songs and the transition style into each one, then perform the set live with a step-by-step checklist. Every transition is graded. |
+| **Learn** | Three short guided lessons: 1 First Mix (the color code and your first beatmix), 2 Fade & Cut (the DJ loop, no beatmatching needed), 3 Sync, Loops & FX. |
+| **Build a set** | Choose 2-5 songs and the transition into each one, then perform the set live with a step-by-step checklist. Every transition is graded and recorded, and the set gets a critique. |
 | **Freestyle** | Just play. No timer, no rules. |
 
 | Venue | |
@@ -40,16 +40,20 @@ Every control has a color, and Learn mode opens with a quick quiz on it:
 
 | Color | Means |
 |---|---|
-| Blue | Deck A (left) |
+| Blue | Deck A (left), including its LOAD and SYNC |
 | Pink | Deck B (right) |
 | Green | PLAY |
-| Orange | CUE and the HOT CUE pads (jump to bar 1, 5, 9 or 13) |
-| Yellow | FILTER and PHONES: shaping the sound, and what only you hear |
+| Orange | CUE, the HOT CUE pads (jump to bar 1, 5, 9 or 13) and LOOP |
+| Yellow | FILTER, ECHO and PHONES: effects, and what only you hear |
 | Red | TAP and the SAMPLER pads (horn, cheer, siren, zap): for the crowd |
 
 ## What you learn
 
-Learn mode is one guided session of 20 steps. The control you need next pulses gold, and a hint appears if you're stuck.
+The lessons follow the techniques chapter of Digital DJ Tips' free *Rock The Dancefloor* course
+(the basic DJ workflow, the three elements of a beatmix, the five basic transitions, sync, hot cues and loops,
+EQ, filters and effects, and recording and critiquing your sets), rebuilt as hands-on steps.
+
+**Lesson 1: First Mix** (20 steps, about 7 minutes). The control you need next pulses gold, and a hint appears if you're stuck.
 
 | # | Skill | What you do |
 |---|---|---|
@@ -63,22 +67,36 @@ Learn mode is one guided session of 20 steps. The control you need next pulses g
 | 15-18 | The blend | Cut the bass, bring Deck B in, swap the basslines, finish the transition |
 | 19-20 | Effects | Filter sweep and the air horn |
 
+**Lesson 2: Fade & Cut** (13 steps, about 4 minutes): the DJ loop (load, preview in PHONES, cue, bring in, stop the old
+song), then a **fade** (a clear dip, about 10 seconds of fading, the new song dropped on a phrase; it tells you if you fade too fast)
+and a **cut** (hot cue to bar 1, then PLAY and crossfader together on a phrase line, with no overlap).
+
+**Lesson 3: Sync, Loops & FX** (11 steps, about 5 minutes): tap tempo (it shows the BPM you tap), SYNC, a
+**single-phrase beatmix** held for 8 bars, a 4-bar **loop**, and an **echo out**, ending with "less is more".
+
 ## Build a set
 
 Tap a transition style, then tap songs in the crate to add them in order. Each song is mixed in with the style that was
 selected when you added it:
 
-| Style | How it's done |
-|---|---|
-| Blend | Beatmatch, then crossfade slowly. |
-| Bass swap | Cut the new song's LOW, blend, then trade basslines on a 4-bar line. |
-| Filter fade | Blend while sweeping the old song's FILTER to muffle it. |
-| Quick cut | Match the tempo, then on bar 1 hit PLAY and slam the crossfader. No overlap. |
+| Style | How it's done | Graded on |
+|---|---|---|
+| Phrase mix | Preview in PHONES, beatmatch, bring it in on a phrase, play both for about 8 bars, crossfade. | 4-20 bars in sync, entered on a phrase line |
+| Bass swap | Cut the new song's LOW, beatmix, then trade basslines. | New LOW cut on entry, no muddy bass, no clashing |
+| Filter mix | Beatmix while sweeping the old song's FILTER. | Filter used, no clashing |
+| Quick cut | Match the tempo, CUE to bar 1, then PLAY and slam the crossfader on a phrase line. | No overlap, on bar 1, 5, 9 or 13 |
+| Fade | Dip the old song's fader, fade it over about 10 seconds, start the new song on a phrase. | 6-25 s fade, new song on a phrase |
+| Echo out | ECHO on, cut the old song's fader on a phrase, drop the new song while the echoes fade. | Echo on at the cut, new song on a bar line within 4 s |
+
+The builder warns when a beatmix joins songs more than 4% apart in tempo, and suggests a fade, cut or echo out instead.
 
 **GO LIVE** performs the set. The next song is loaded for you, and a checklist walks you through each planned
 transition with the right controls glowing. Each transition is graded PERFECT / GOOD / ROUGH with a tip. Crowd energy
 rises for in-sync blends and bass drops (cut the LOW, slam it back on a bar line). It falls for trainwrecks, muddy
-bass clashes and silence. Your set is saved between sessions.
+bass clashes, silence and leaving the ECHO on for too long (less is more). Your set is saved between sessions.
+
+After the set, **LISTEN BACK** replays a recording of each transition, and a critique shows how much of your mixing
+time the beats were in sync, the seconds of clashing and silence, and the one thing to practise next.
 
 ## Hand controls
 
@@ -87,6 +105,7 @@ bass clashes and silence. Your set is saved between sessions.
 | Buttons and pads | Poke down from above. Brushing past from the side won't trigger them. |
 | Faders | Touch the cap and slide. The tempo fader is geared 1:3 for fine control and clicks into 0%. |
 | Knobs | Touch the top and slide your finger away/right to turn up, toward you/left to turn down. Double-tap to reset to center. |
+| SYNC / LOOP / ECHO | SYNC matches tempo and lines up the beats. LOOP repeats the current 4-bar phrase. ECHO is a beat-synced echo after the fader, so pulling the fader down lets the echoes ring out. |
 | Jog wheels | Rest a fingertip on the platter and spin: clockwise speeds the track up, counter-clockwise slows it. When paused, it scrubs. |
 
 A glowing dot on each index fingertip shows exactly where you're touching, and turns gold while you're holding a control.
@@ -123,8 +142,8 @@ To regenerate the scene after changing the builder: **DJ Master > Build Scene**.
 
 ## Tests
 
-- **EditMode (20):** mixer math (constant-power crossfader, EQ curve, tempo range, phase wrap), synth loop length/levels/kick timing, text wrap with color tags, set lists (add, undo, save/load), set stars.
-- **PlayMode (7):** loads the real scene and drives it with a simulated fingertip. Covers poking PLAY (and *not* triggering it from the side), fader drags, the fine-geared tempo fader, venue switching, menu > venue > color quiz, a full Learn run from step 1 to "LESSON COMPLETE", and building and performing a 3-song set with a perfect blend and a perfect quick cut.
+- **EditMode (24):** mixer math (constant-power crossfader, EQ curve, tempo range, phase wrap), synth loop length/levels/kick timing, text wrap with color tags, tap tempo, sync math, set lists (add, undo, save/load, tempo-gap advice), set stars.
+- **PlayMode (10):** loads the real scene and drives it with a simulated fingertip. Covers poking PLAY (and *not* triggering it from the side), fader drags, the fine-geared tempo fader, venue switching, menu > venue > color quiz, a full Learn run from step 1 to "LESSON COMPLETE", full runs of lessons 2 and 3, building and performing a set with a perfect phrase mix and quick cut, and a set with a perfect fade and echo out that checks the recordings and LISTEN BACK.
 
 Run them from **Window > General > Test Runner**.
 
@@ -132,7 +151,8 @@ Run them from **Window > General > Test Runner**.
 
 ```
 Assets/DJMaster/
-  Scripts/Audio/        TrackSynth (procedural music), TrackLibrary, Deck, ChannelStrip (EQ/filter DSP), Mixer, Sfx, DJMath
+  Scripts/Audio/        TrackSynth (procedural music), TrackLibrary, Deck (hot cues, loops), ChannelStrip (EQ/filter/echo DSP),
+                        Mixer, MixRecorder (listen back), Sfx, DJMath
   Scripts/Interaction/  Pointer, HandPointerSource (index fingertip), MousePointerSource, PokeButton, Fader, Knob, JogWheel
   Scripts/Game/         GameDirector (menus and modes), LessonDirector (Learn), SetList + SetPerformer (Build a set / live show),
                         MixJudge (crowd energy + score), DJBoard

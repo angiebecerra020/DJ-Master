@@ -79,5 +79,22 @@ namespace DJMaster.Tests
             Assert.AreEqual(2, SetPerformer.Stars(new[] { R(SetPerformer.Grade.Good), R(SetPerformer.Grade.Good) }));
             Assert.AreEqual(3, SetPerformer.Stars(new[] { R(SetPerformer.Grade.Perfect), R(SetPerformer.Grade.Perfect), R(SetPerformer.Grade.Good) }));
         }
+
+        [Test]
+        public void TapTempo()
+        {
+            float gap = 60f / 128f;
+            Assert.AreEqual(0f, DJMath.BpmFromTaps(new[] { 0f, gap }), "needs at least 3 taps");
+            Assert.AreEqual(128f, DJMath.BpmFromTaps(new[] { 0f, gap, gap * 2, gap * 3 }), 0.01f);
+            Assert.AreEqual(0f, DJMath.BpmFromTaps(new[] { 0f, gap, gap * 3 }), "uneven taps are ignored");
+        }
+
+        [Test]
+        public void TempoFaderForIsTheInverseOfTempoRate()
+        {
+            foreach (float v in new[] { 0f, 0.3f, 0.5f, 0.9f, 1f })
+                Assert.AreEqual(v, DJMath.TempoFaderFor(DJMath.TempoRate(v)), 1e-5f);
+            Assert.Greater(DJMath.TempoFaderFor(1.1f), 1f, "10% is out of range");
+        }
     }
 }
