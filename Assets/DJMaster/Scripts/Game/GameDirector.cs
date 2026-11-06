@@ -4,8 +4,8 @@ namespace DJMaster
 {
     public enum GameMode { Title, ChooseVenue, ChooseLesson, Learn, Build, Live, LiveResults, Freestyle }
 
-    // Top-level flow: pick a mode (Learn / Build a set / Freestyle), then pick where to play
-    // (your room, a club or a festival). Also wires up the scene and comfort buttons.
+    // Top-level flow: on the black start screen, pick a mode (Learn / Build a set / Freestyle) and where to play
+    // (your room, a club or a festival), then step into the booth. Also wires up the scene and comfort buttons.
     public class GameDirector : MonoBehaviour
     {
         public DJBoard board;
@@ -15,6 +15,7 @@ namespace DJMaster
         public SetPerformer performer;
         public MixRecorder recorder;
         public InstructionPanel panel;
+        public StartMenu startMenu;
         public SetBuilderPanel builder;
         public EnvironmentManager environment;
         public SeatedAnchor anchor;
@@ -35,6 +36,11 @@ namespace DJMaster
             {
                 int idx = i;
                 panel.actionButtons[i].Pressed += () => Action(idx);
+            }
+            for (int i = 0; i < startMenu.buttons.Length; i++)
+            {
+                int idx = i;
+                startMenu.buttons[i].Pressed += () => MenuAction(idx);
             }
             roomButton.Pressed += () => environment.SetMode(EnvMode.Room);
             clubButton.Pressed += () => environment.SetMode(EnvMode.Club);
@@ -67,11 +73,18 @@ namespace DJMaster
             Time.timeScale = p ? 0f : 1f;
         }
 
+        public bool OnStartScreen => Mode == GameMode.Title || Mode == GameMode.ChooseVenue || Mode == GameMode.ChooseLesson;
+
         void SetMode(GameMode mode)
         {
             Mode = mode;
+            // The start screen is its own black space: no booth, no venue, no passthrough.
+            bool menu = OnStartScreen;
+            startMenu.gameObject.SetActive(menu);
+            board.gameObject.SetActive(!menu);
+            environment.SetMenuScreen(menu);
             bool building = mode == GameMode.Build;
-            panel.gameObject.SetActive(!building);
+            panel.gameObject.SetActive(!building && !menu);
             builder.gameObject.SetActive(building);
         }
 
@@ -79,25 +92,46 @@ namespace DJMaster
         {
             lessons.Stop();
             performer.Stop();
+            recorder.StopReplay();
+            board.A.deck.Pause();
+            board.B.deck.Pause();
             SetMode(GameMode.Title);
-            panel.SetActions("LEARN", "BUILD A SET", "FREESTYLE");
+            int best = PlayerPrefs.GetInt("bestSet", 0);
+            startMenu.Show("DJ MASTER", "Learn to DJ with just your hands",
+                best > 0 ? $"Best live set: {best} pts" : LessonDirector.IsDone(0) ? "" : "New to DJing? Start with LEARN.");
+            startMenu.SetRows(
+                ("LEARN", "Three short lessons: your first mix, fades and cuts, then sync, loops and effects."),
+                ("BUILD A SET", "Pick songs and transitions, then perform them live for a crowd."),
+                ("FREESTYLE", "Just play. No timer, no rules."));
         }
 
         void ChooseVenue(GameMode next)
         {
             ChosenMode = next;
             SetMode(GameMode.ChooseVenue);
-            panel.SetActions("MY ROOM", "CLUB", "FESTIVAL", "BACK");
+            string what = next == GameMode.Learn ? "LEARN" : next == GameMode.Build ? "BUILD A SET" : "FREESTYLE";
+            startMenu.Show("WHERE DO YOU WANT TO PLAY?", $"Mode: {what}", "You can switch anytime with the SCENE panel next to the booth.");
+            startMenu.SetRows(
+                ("MY ROOM", "Mixed reality: the booth appears in your real surroundings."),
+                ("CLUB", "A dark club with lasers, a mirror ball and a packed dance floor."),
+                ("FESTIVAL", "A night-time main stage with fireworks and a huge crowd."),
+                ("BACK", ""));
         }
 
         void ChooseLesson()
         {
             lessons.Stop();
             SetMode(GameMode.ChooseLesson);
-            panel.SetActions("1 FIRST MIX", "2 FADE & CUT", "3 SYNC & FX", "MENU");
+            string Done(int n) => LessonDirector.IsDone(n) ? "DONE.  " : "";
+            startMenu.Show("PICK A LESSON", "Each one is a few minutes, one control at a time", "New? Start with lesson 1.");
+            startMenu.SetRows(
+                ("1 FIRST MIX", Done(0) + "The color code, the beat, and your first beatmix. About 7 minutes."),
+                ("2 FADE & CUT", Done(1) + "The DJ loop, fades and cuts. No beatmatching needed. About 4 minutes."),
+                ("3 SYNC & FX", Done(2) + "Tap tempo, SYNC, an 8-bar mix, loops and echo. About 5 minutes."),
+                ("MENU", ""));
         }
 
-        void Action(int i)
+        void MenuAction(int i)
         {
             switch (Mode)
             {
@@ -115,6 +149,13 @@ namespace DJMaster
                     if (i == 3) EnterTitle();
                     else StartLearn(i);
                     break;
+            }
+        }
+
+        void Action(int i)
+        {
+            switch (Mode)
+            {
                 case GameMode.Learn:
                     if (i == 0) ChooseLesson();
                     else if (i == 1) lessons.Skip();
@@ -219,35 +260,6 @@ namespace DJMaster
         {
             switch (Mode)
             {
-                case GameMode.Title:
-                    bool schooled = PlayerPrefs.GetInt("lessonComplete", 0) == 1;
-                    int best = PlayerPrefs.GetInt("bestSet", 0);
-                    panel.Show("DJ MASTER",
-                        "Choose a mode:\n" +
-                        $"{BoardColors.Blue("LEARN")}  three short lessons: your first mix, fades and cuts, sync, loops and FX.\n" +
-                        $"{BoardColors.Pink("BUILD A SET")}  pick songs and transitions, then perform them live.\n" +
-                        $"{BoardColors.Yellow("FREESTYLE")}  just play, no rules.",
-                        best > 0 ? $"Best live set: {best} pts" : schooled ? "" : "New to DJing? Start with LEARN, lesson 1 (about 7 minutes).");
-                    break;
-
-                case GameMode.ChooseVenue:
-                    string what = ChosenMode == GameMode.Learn ? "LEARN" : ChosenMode == GameMode.Build ? "BUILD A SET" : "FREESTYLE";
-                    panel.Show("WHERE DO YOU WANT TO PLAY?",
-                        "MY ROOM  keep seeing your real surroundings (mixed reality).\n" +
-                        "CLUB  a dark club with lasers, a mirror ball and a packed dance floor.\n" +
-                        "FESTIVAL  a night-time main stage with fireworks and a huge crowd.",
-                        $"Mode: {what}.  You can switch anytime with the SCENE panel on your left.");
-                    break;
-
-                case GameMode.ChooseLesson:
-                    string Line(int n, string what) => $"{(LessonDirector.IsDone(n) ? BoardColors.Green("DONE ") : "")}{n + 1}  {LessonDirector.LessonNames[n]}: {what}";
-                    panel.Show("LEARN: PICK A LESSON",
-                        Line(0, "the color code, the beat, and your first beatmix (7 min)") + "\n" +
-                        Line(1, "the DJ loop, fades and cuts. No beatmatching needed (4 min)") + "\n" +
-                        Line(2, "tap tempo, SYNC, an 8-bar mix, loops and echo (5 min)"),
-                        "New? Start with lesson 1.");
-                    break;
-
                 case GameMode.Learn:
                     var s = lessons.Current;
                     if (s == null) break;

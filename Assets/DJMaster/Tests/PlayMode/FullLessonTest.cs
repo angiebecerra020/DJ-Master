@@ -30,13 +30,13 @@ namespace DJMaster.Tests
         public IEnumerator CompleteDJSchool()
         {
             var lessons = Object.FindAnyObjectByType<LessonDirector>();
-            var board = Object.FindAnyObjectByType<DJBoard>();
-            var panel = Object.FindAnyObjectByType<InstructionPanel>();
+            var board = Object.FindAnyObjectByType<DJBoard>(FindObjectsInactive.Include);
+            var menu = Object.FindAnyObjectByType<StartMenu>();
             var A = board.A.deck;
             var B = board.B.deck;
-            panel.actionButtons[0].SimulatePress(); // LEARN
-            panel.actionButtons[1].SimulatePress(); // CLUB
-            panel.actionButtons[0].SimulatePress(); // lesson 1
+            menu.buttons[0].SimulatePress(); // LEARN
+            menu.buttons[1].SimulatePress(); // CLUB
+            menu.buttons[0].SimulatePress(); // lesson 1
             yield return WaitFor(() => lessons.Running && A.IsLoaded, 20f, "lesson start");
 
             int step = 0;

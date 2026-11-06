@@ -49,13 +49,14 @@ namespace DJMaster.Tests
         public IEnumerator BuildAndPerformASet()
         {
             var game = Object.FindAnyObjectByType<GameDirector>();
-            var panel = Object.FindAnyObjectByType<InstructionPanel>();
+            var panel = Object.FindAnyObjectByType<InstructionPanel>(FindObjectsInactive.Include);
+            var menu = Object.FindAnyObjectByType<StartMenu>();
             var builder = Object.FindAnyObjectByType<SetBuilderPanel>(FindObjectsInactive.Include);
             var performer = Object.FindAnyObjectByType<SetPerformer>();
-            var board = Object.FindAnyObjectByType<DJBoard>();
+            var board = Object.FindAnyObjectByType<DJBoard>(FindObjectsInactive.Include);
 
-            panel.actionButtons[1].SimulatePress(); // BUILD A SET
-            panel.actionButtons[1].SimulatePress(); // CLUB
+            menu.buttons[1].SimulatePress(); // BUILD A SET
+            menu.buttons[1].SimulatePress(); // CLUB
             Assert.AreEqual(GameMode.Build, game.Mode);
             Assert.IsTrue(builder.gameObject.activeSelf);
             Assert.IsFalse(panel.gameObject.activeSelf);
@@ -116,15 +117,16 @@ namespace DJMaster.Tests
         public IEnumerator FadeAndEchoOutAreGradedAndRecorded()
         {
             var game = Object.FindAnyObjectByType<GameDirector>();
-            var panel = Object.FindAnyObjectByType<InstructionPanel>();
+            var panel = Object.FindAnyObjectByType<InstructionPanel>(FindObjectsInactive.Include);
+            var menu = Object.FindAnyObjectByType<StartMenu>();
             var builder = Object.FindAnyObjectByType<SetBuilderPanel>(FindObjectsInactive.Include);
             var performer = Object.FindAnyObjectByType<SetPerformer>();
             var recorder = Object.FindAnyObjectByType<MixRecorder>();
-            var board = Object.FindAnyObjectByType<DJBoard>();
+            var board = Object.FindAnyObjectByType<DJBoard>(FindObjectsInactive.Include);
             var A = board.A; var B = board.B;
 
-            panel.actionButtons[1].SimulatePress(); // BUILD A SET
-            panel.actionButtons[0].SimulatePress(); // MY ROOM
+            menu.buttons[1].SimulatePress(); // BUILD A SET
+            menu.buttons[0].SimulatePress(); // MY ROOM
             builder.clear.SimulatePress();
             builder.crateButtons[0].SimulatePress();                          // Neon Tides, 128
             builder.styleButtons[(int)TransitionStyle.Fade].SimulatePress();

@@ -25,6 +25,15 @@ namespace DJMaster.Tests
         [TearDown]
         public void Cleanup() => Pointers.Remove(finger);
 
+        // Freestyle in your room: the booth with nothing else going on.
+        static IEnumerator EnterBooth()
+        {
+            var menu = Object.FindAnyObjectByType<StartMenu>();
+            menu.buttons[2].SimulatePress(); // FREESTYLE
+            menu.buttons[0].SimulatePress(); // MY ROOM
+            yield return null;
+        }
+
         IEnumerator Poke(PokeButton b)
         {
             finger.DirectPress = false;
@@ -62,7 +71,8 @@ namespace DJMaster.Tests
         [UnityTest]
         public IEnumerator PokingPlayStartsTheDeck()
         {
-            var board = Object.FindAnyObjectByType<DJBoard>();
+            yield return EnterBooth();
+            var board = Object.FindAnyObjectByType<DJBoard>(FindObjectsInactive.Include);
             Assert.IsNotNull(board);
             var deck = board.A.deck;
             yield return WaitFor(() => deck.IsLoaded, 20f);
@@ -86,7 +96,8 @@ namespace DJMaster.Tests
         [UnityTest]
         public IEnumerator FaderFollowsFingerAndDrivesMixer()
         {
-            var board = Object.FindAnyObjectByType<DJBoard>();
+            yield return EnterBooth();
+            var board = Object.FindAnyObjectByType<DJBoard>(FindObjectsInactive.Include);
             var mixer = board.mixer;
             Assert.AreEqual(0f, board.A.volume.value, 1e-4f);
             yield return Drag(board.A.volume, 0f, 1f);
@@ -100,7 +111,8 @@ namespace DJMaster.Tests
         [UnityTest]
         public IEnumerator TempoFaderIsFineGrained()
         {
-            var board = Object.FindAnyObjectByType<DJBoard>();
+            yield return EnterBooth();
+            var board = Object.FindAnyObjectByType<DJBoard>(FindObjectsInactive.Include);
             var tempo = board.B.tempo;
             yield return Drag(tempo, 0.5f, 1f);
             // Finger moved half the slot; with the 0.35 drag ratio the cap moves much less.
@@ -113,20 +125,24 @@ namespace DJMaster.Tests
         {
             var game = Object.FindAnyObjectByType<GameDirector>();
             var lessons = Object.FindAnyObjectByType<LessonDirector>();
-            var panel = Object.FindAnyObjectByType<InstructionPanel>();
+            var menu = Object.FindAnyObjectByType<StartMenu>();
             var env = Object.FindAnyObjectByType<EnvironmentManager>();
-            var board = Object.FindAnyObjectByType<DJBoard>();
+            var board = Object.FindAnyObjectByType<DJBoard>(FindObjectsInactive.Include);
             Assert.AreEqual(GameMode.Title, game.Mode);
+            Assert.IsTrue(env.MenuScreen, "the start screen is its own black space");
+            Assert.IsFalse(board.gameObject.activeSelf, "the booth is hidden on the start screen");
 
-            yield return Poke(panel.actionButtons[0]); // LEARN
+            yield return Poke(menu.buttons[0]); // LEARN
             Assert.AreEqual(GameMode.ChooseVenue, game.Mode);
             yield return new WaitForSeconds(0.3f);
-            yield return Poke(panel.actionButtons[2]); // FESTIVAL
+            yield return Poke(menu.buttons[2]); // FESTIVAL
             Assert.AreEqual(GameMode.ChooseLesson, game.Mode);
             Assert.AreEqual(EnvMode.Festival, env.Mode);
             yield return new WaitForSeconds(0.3f);
-            yield return Poke(panel.actionButtons[0]); // 1 FIRST MIX
+            yield return Poke(menu.buttons[0]); // 1 FIRST MIX
             Assert.AreEqual(GameMode.Learn, game.Mode);
+            Assert.IsFalse(env.MenuScreen);
+            Assert.IsTrue(board.gameObject.activeSelf, "the booth appears once you pick a lesson");
             Assert.AreEqual(0, lessons.StepIndex);
 
             // Wrong color: told what it was, no progress.
@@ -143,6 +159,7 @@ namespace DJMaster.Tests
         [UnityTest]
         public IEnumerator EnvironmentButtonsSwitchVenues()
         {
+            yield return EnterBooth();
             var env = Object.FindAnyObjectByType<EnvironmentManager>();
             env.clubButton.SimulatePress();
             yield return null;

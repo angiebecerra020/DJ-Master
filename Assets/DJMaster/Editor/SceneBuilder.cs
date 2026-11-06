@@ -69,6 +69,7 @@ namespace DJMaster.EditorTools
 
             var panel = BuildPanel(board.transform);
             var builder = BuildSetBuilder(board.transform, deckA);
+            var startMenu = BuildStartMenu(world);
             var scenePanel = BuildScenePanel(board.transform, out var roomBtn, out var clubBtn, out var festBtn, out var recenterBtn, out var upBtn, out var downBtn);
 
             // ---------- Venues ----------
@@ -108,7 +109,7 @@ namespace DJMaster.EditorTools
 
             var game = directors.AddComponent<GameDirector>();
             game.board = board; game.mixer = mixer; game.judge = judge; game.lessons = lessons;
-            game.performer = performer; game.builder = builder; game.recorder = recorder;
+            game.performer = performer; game.builder = builder; game.recorder = recorder; game.startMenu = startMenu;
             game.panel = panel; game.environment = env; game.anchor = anchor;
             game.roomButton = roomBtn; game.clubButton = clubBtn; game.festivalButton = festBtn;
             game.recenterButton = recenterBtn; game.raiseButton = upBtn; game.lowerButton = downBtn;
@@ -498,6 +499,38 @@ namespace DJMaster.EditorTools
             p.clear = Action(2, "CLEAR", Color.white);
             p.goLive = Action(3, "GO LIVE", BoardColors.Play);
             return p;
+        }
+
+        // The start screen: a purple menu floating in the dark, within easy reach of a seated player.
+        static StartMenu BuildStartMenu(Transform world)
+        {
+            var go = new GameObject("StartMenu");
+            go.transform.SetParent(world, false);
+            go.transform.localPosition = new Vector3(0, 1.0f, 0.5f);   // a little below eye height, an arm's length away
+            go.transform.localRotation = Quaternion.Euler(20, 0, 0);
+            var m = go.AddComponent<StartMenu>();
+            var t = go.transform;
+            var faceUser = Quaternion.Euler(-90, 0, 0);
+            var purple = StartMenu.Purple;
+
+            Box("Back", t, new Vector3(0, -0.005f, 0.004f), new Vector3(0.62f, 0.37f, 0.006f), Unlit("MenuBack", new Color(0.035f, 0.01f, 0.06f)));
+            Box("EdgeTop", t, new Vector3(0, 0.18f, 0.003f), new Vector3(0.62f, 0.004f, 0.007f), Unlit("MenuEdge", purple));
+            Box("EdgeBottom", t, new Vector3(0, -0.19f, 0.003f), new Vector3(0.62f, 0.004f, 0.007f), Unlit("MenuEdge", purple));
+            m.title = Text("Title", t, new Vector3(0, 0.165f, 0), 0.0042f, TextAnchor.UpperCenter, purple);
+            m.subtitle = Text("Subtitle", t, new Vector3(0, 0.105f, 0), 0.0017f, TextAnchor.UpperCenter, StartMenu.Lavender);
+            m.footer = Text("Footer", t, new Vector3(0, -0.16f, 0), 0.0013f, TextAnchor.MiddleCenter, StartMenu.Lavender);
+            m.wrapChars = 34;
+
+            for (int i = 0; i < 4; i++)
+            {
+                float y = 0.045f - i * 0.05f;
+                var b = MakeButton($"menu.{i}", "", t, new Vector3(-0.155f, y, -0.004f), new Vector2(0.22f, 0.04f), Unlit("Cap", Color.gray), purple,
+                    out m.labels[i], faceUser, 0.0017f, Color.white);
+                b.offColor = new Color(0.3f, 0.1f, 0.5f);
+                m.buttons[i] = b;
+                m.descriptions[i] = Text($"Description{i}", t, new Vector3(-0.025f, y, 0), 0.00145f, TextAnchor.MiddleLeft, purple);
+            }
+            return m;
         }
 
         static GameObject BuildScenePanel(Transform board, out PokeButton room, out PokeButton club, out PokeButton fest, out PokeButton recenter, out PokeButton up, out PokeButton down)
@@ -935,6 +968,8 @@ namespace DJMaster.EditorTools
             Build();
             var env = Object.FindAnyObjectByType<EnvironmentManager>();
             var world = Object.FindAnyObjectByType<SeatedAnchor>().transform;
+            var menu = Object.FindAnyObjectByType<StartMenu>();
+            menu.gameObject.SetActive(false); // rendered on its own below
             Vector3 eye = world.TransformPoint(new Vector3(0, 1.24f, 0));
             foreach (var mode in new[] { EnvMode.Room, EnvMode.Club, EnvMode.Festival })
             {
@@ -947,18 +982,26 @@ namespace DJMaster.EditorTools
             RenderPreview("Preview_Board.png", world.TransformPoint(new Vector3(0, 1.24f, 0.02f)), new Vector3(42, 0, 0), 62f, false);
             RenderPreview("Preview_Panel.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(8, 0, 0), 60f, false);
 
-            // The title menu and Build mode, filled in the way they look at runtime.
+            // The start screen and Build mode, filled in the way they look at runtime.
             var panel = Object.FindAnyObjectByType<InstructionPanel>();
             var builder = Object.FindAnyObjectByType<SetBuilderPanel>(FindObjectsInactive.Include);
-            panel.Show("DJ MASTER",
-                "Choose a mode:\n" +
-                $"{BoardColors.Blue("LEARN")}  a guided lesson: the board's colors, beatmatching and your first mix.\n" +
-                $"{BoardColors.Pink("BUILD A SET")}  pick songs and transitions, then perform them live.\n" +
-                $"{BoardColors.Yellow("FREESTYLE")}  just play, no rules.",
-                "New to DJing? Start with LEARN (about 7 minutes).");
-            panel.SetActions("LEARN", "BUILD A SET", "FREESTYLE");
-            builder.gameObject.SetActive(false);
-            RenderPreview("Preview_Menu.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(14, 0, 0), 60f, false);
+            menu.gameObject.SetActive(true);
+            var boardGo = Object.FindAnyObjectByType<DJBoard>().gameObject;
+            menu.Show("DJ MASTER", "Learn to DJ with just your hands", "New to DJing? Start with LEARN.");
+            menu.SetRows(
+                ("LEARN", "Three short lessons: your first mix, fades and cuts, then sync, loops and effects."),
+                ("BUILD A SET", "Pick songs and transitions, then perform them live for a crowd."),
+                ("FREESTYLE", "Just play. No timer, no rules."));
+            var tint = new MaterialPropertyBlock(); // what PokeButton does at runtime
+            tint.SetColor("_Color", menu.buttons[0].offColor);
+            foreach (var b in menu.buttons) b.capRenderer.SetPropertyBlock(tint);
+            boardGo.SetActive(false);
+            env.editorRoomStandIn.SetActive(false);
+            RenderPreview("Preview_Menu.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(20, 0, 0), 60f, false);
+            foreach (var b in menu.buttons) b.capRenderer.SetPropertyBlock(null);
+            menu.gameObject.SetActive(false);
+            boardGo.SetActive(true);
+            env.editorRoomStandIn.SetActive(true);
 
             panel.gameObject.SetActive(false);
             builder.gameObject.SetActive(true);

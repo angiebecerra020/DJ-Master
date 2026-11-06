@@ -4,7 +4,7 @@ Learn to DJ with just your hands. A mixed reality DJ school for Meta Quest.
 
 A full two-deck DJ controller appears on your real desk: big jog wheels, round CUE and PLAY buttons, hot cue and sampler pads,
 tempo faders, and a mixer with EQs, filters, channel faders and a crossfader.
-Pick a mode, then pick where to play:
+It starts on its own black start screen with a purple menu: pick a mode, then where to play, then step into the booth.
 
 | Mode | What you do |
 |---|---|
@@ -28,7 +28,7 @@ No controllers needed. Every interaction is a fingertip poke, slide or spin.
 
 ![board](Docs/board.png)
 
-| Mode menu | Build a set |
+| Start screen | Build a set |
 |---|---|
 | ![menu](Docs/menu.png) | ![build](Docs/build.png) |
 

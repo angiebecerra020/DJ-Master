@@ -21,7 +21,7 @@ namespace DJMaster.Tests
 #endif
             yield return null;
             lessons = Object.FindAnyObjectByType<LessonDirector>();
-            board = Object.FindAnyObjectByType<DJBoard>();
+            board = Object.FindAnyObjectByType<DJBoard>(FindObjectsInactive.Include);
             step = 0;
         }
 
@@ -46,10 +46,10 @@ namespace DJMaster.Tests
 
         IEnumerator StartLesson(int lesson)
         {
-            var panel = Object.FindAnyObjectByType<InstructionPanel>();
-            panel.actionButtons[0].SimulatePress(); // LEARN
-            panel.actionButtons[0].SimulatePress(); // MY ROOM
-            panel.actionButtons[lesson].SimulatePress();
+            var menu = Object.FindAnyObjectByType<StartMenu>();
+            menu.buttons[0].SimulatePress(); // LEARN
+            menu.buttons[0].SimulatePress(); // MY ROOM
+            menu.buttons[lesson].SimulatePress();
             yield return WaitFor(() => lessons.Running && board.A.deck.IsPlaying && board.B.deck.IsLoaded, 20f, "lesson start");
             Assert.AreEqual(lesson, lessons.LessonIndex);
         }
