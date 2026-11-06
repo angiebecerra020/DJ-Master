@@ -130,7 +130,7 @@ namespace DJMaster
             if (shoutoutTimer <= 0) Shoutout = "";
         }
 
-        void Award(string message, int points)
+        public void Award(string message, int points)
         {
             Score += points;
             Shoutout = $"{message}  +{points}";

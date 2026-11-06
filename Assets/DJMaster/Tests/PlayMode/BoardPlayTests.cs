@@ -109,22 +109,32 @@ namespace DJMaster.Tests
         }
 
         [UnityTest]
-        public IEnumerator LessonAdvancesFromPlayToVolume()
+        public IEnumerator MenuLeadsThroughVenueToTheColorQuiz()
         {
             var game = Object.FindAnyObjectByType<GameDirector>();
             var lessons = Object.FindAnyObjectByType<LessonDirector>();
             var panel = Object.FindAnyObjectByType<InstructionPanel>();
+            var env = Object.FindAnyObjectByType<EnvironmentManager>();
             var board = Object.FindAnyObjectByType<DJBoard>();
-            yield return Poke(panel.actionButtons[0]); // DJ SCHOOL
-            Assert.AreEqual(GameMode.Lesson, game.Mode);
-            Assert.AreEqual(0, lessons.StepIndex);
-            Assert.IsTrue(board.A.play.Highlighted);
+            Assert.AreEqual(GameMode.Title, game.Mode);
 
-            yield return WaitFor(() => board.A.deck.IsLoaded, 20f);
-            yield return Poke(board.A.play);
+            yield return Poke(panel.actionButtons[0]); // LEARN
+            Assert.AreEqual(GameMode.ChooseVenue, game.Mode);
+            yield return new WaitForSeconds(0.3f);
+            yield return Poke(panel.actionButtons[2]); // FESTIVAL
+            Assert.AreEqual(GameMode.Learn, game.Mode);
+            Assert.AreEqual(EnvMode.Festival, env.Mode);
+            Assert.AreEqual(0, lessons.StepIndex);
+
+            // Wrong color: told what it was, no progress.
+            board.B.low.SimulateTouch();
+            yield return null;
+            StringAssert.Contains("PINK", lessons.Feedback);
+            Assert.AreEqual(0, lessons.StepIndex);
+
+            board.A.low.SimulateTouch();
             yield return WaitFor(() => lessons.StepIndex == 1, 4f);
             Assert.AreEqual(1, lessons.StepIndex);
-            Assert.IsTrue(board.A.volume.Highlighted);
         }
 
         [UnityTest]

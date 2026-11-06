@@ -2,47 +2,53 @@ using UnityEngine;
 
 namespace DJMaster
 {
-    public enum GameMode { Menu, Lesson, Gig, Free, GigResults }
+    public enum GameMode { Title, ChooseVenue, Learn, Build, Live, LiveResults, Freestyle }
 
-    // Top-level flow: menu -> DJ school / a timed gig / free play, plus the scene and comfort buttons.
+    // Top-level flow: pick a mode (Learn / Build a set / Freestyle), then pick where to play
+    // (your room, a club or a festival). Also wires up the scene and comfort buttons.
     public class GameDirector : MonoBehaviour
     {
         public DJBoard board;
         public Mixer mixer;
         public MixJudge judge;
         public LessonDirector lessons;
+        public SetPerformer performer;
         public InstructionPanel panel;
+        public SetBuilderPanel builder;
         public EnvironmentManager environment;
         public SeatedAnchor anchor;
         public PokeButton roomButton, clubButton, festivalButton, recenterButton, raiseButton, lowerButton;
-        public float gigSeconds = 180f;
 
         public GameMode Mode { get; private set; }
-        public float GigTimeLeft { get; private set; }
+        public GameMode ChosenMode { get; private set; } // what starts after the venue is picked
 
         bool paused;
         float lastScore;
-        int lastTransitions;
 
         void Start()
         {
             TrackLibrary.Prewarm();
 
-            panel.actionButtons[0].Pressed += () => Action(0);
-            panel.actionButtons[1].Pressed += () => Action(1);
-            panel.actionButtons[2].Pressed += () => Action(2);
+            for (int i = 0; i < panel.actionButtons.Length; i++)
+            {
+                int idx = i;
+                panel.actionButtons[i].Pressed += () => Action(idx);
+            }
             roomButton.Pressed += () => environment.SetMode(EnvMode.Room);
             clubButton.Pressed += () => environment.SetMode(EnvMode.Club);
             festivalButton.Pressed += () => environment.SetMode(EnvMode.Festival);
             recenterButton.Pressed += anchor.Recenter;
             raiseButton.Pressed += () => anchor.AdjustHeight(0.02f);
             lowerButton.Pressed += () => anchor.AdjustHeight(-0.02f);
-            lessons.Completed += () => EnterMenu();
+            lessons.Completed += EnterTitle;
+            performer.Completed += ShowResults;
+            builder.BackPressed += EnterTitle;
+            builder.GoLivePressed += StartLive;
 
             OVRManager.InputFocusLost += () => SetPaused(true);
             OVRManager.InputFocusAcquired += () => SetPaused(false);
 
-            EnterMenu();
+            EnterTitle();
             // Something to listen to straight away while you look around the menu.
             board.A.deck.Load(0);
             board.B.deck.Load(1);
@@ -59,140 +65,189 @@ namespace DJMaster
             Time.timeScale = p ? 0f : 1f;
         }
 
-        void EnterMenu()
+        void SetMode(GameMode mode)
         {
-            Mode = GameMode.Menu;
+            Mode = mode;
+            bool building = mode == GameMode.Build;
+            panel.gameObject.SetActive(!building);
+            builder.gameObject.SetActive(building);
+        }
+
+        void EnterTitle()
+        {
             lessons.Stop();
-            panel.SetActions("DJ SCHOOL", "PLAY A GIG", "FREE PLAY");
+            performer.Stop();
+            SetMode(GameMode.Title);
+            panel.SetActions("LEARN", "BUILD A SET", "FREESTYLE");
+        }
+
+        void ChooseVenue(GameMode next)
+        {
+            ChosenMode = next;
+            SetMode(GameMode.ChooseVenue);
+            panel.SetActions("MY ROOM", "CLUB", "FESTIVAL", "BACK");
         }
 
         void Action(int i)
         {
             switch (Mode)
             {
-                case GameMode.Menu:
-                    if (i == 0) StartLesson();
-                    else if (i == 1) StartGig();
-                    else StartFree();
+                case GameMode.Title:
+                    ChooseVenue(i == 0 ? GameMode.Learn : i == 1 ? GameMode.Build : GameMode.Freestyle);
                     break;
-                case GameMode.Lesson:
-                    if (i == 0) EnterMenu();
+                case GameMode.ChooseVenue:
+                    if (i == 3) { EnterTitle(); break; }
+                    environment.SetMode(i == 0 ? EnvMode.Room : i == 1 ? EnvMode.Club : EnvMode.Festival);
+                    if (ChosenMode == GameMode.Learn) StartLearn();
+                    else if (ChosenMode == GameMode.Build) StartBuild();
+                    else StartFreestyle();
+                    break;
+                case GameMode.Learn:
+                    if (i == 0) EnterTitle();
                     else if (i == 1) lessons.Skip();
-                    else StartLesson();
+                    else StartLearn();
                     break;
-                case GameMode.Gig:
-                case GameMode.Free:
-                    if (i == 0) EnterMenu();
-                    else if (i == 1 && Mode == GameMode.Gig) StartGig();
+                case GameMode.Live:
+                    if (i == 0) EnterTitle();
+                    else if (i == 1) StartLive();
+                    else performer.Finish();
                     break;
-                case GameMode.GigResults:
-                    if (i == 0) EnterMenu();
-                    else if (i == 1) StartGig();
-                    else StartFree();
+                case GameMode.LiveResults:
+                    if (i == 0) EnterTitle();
+                    else if (i == 1) StartLive();
+                    else if (i == 2) StartBuild();
+                    else StartFreestyle();
+                    break;
+                case GameMode.Freestyle:
+                    EnterTitle();
                     break;
             }
         }
 
-        void StartLesson()
+        void StartLearn()
         {
-            Mode = GameMode.Lesson;
+            performer.Stop();
+            SetMode(GameMode.Learn);
             panel.SetActions("MENU", "SKIP STEP", "RESTART");
             lessons.Begin();
         }
 
-        void StartGig()
+        void StartBuild()
         {
             lessons.Stop();
-            Mode = GameMode.Gig;
-            panel.SetActions("MENU", "RESTART", null);
+            performer.Stop();
+            SetMode(GameMode.Build);
+            // Songs you add play on Deck A so you can hear your picks.
             board.ResetControls();
-            int first = Random.Range(0, TrackLibrary.Tracks.Length);
-            board.A.deck.Load(first);
-            board.A.deck.Play();
             board.A.volume.SetValue(1f);
             board.crossfader.SetValue(0f);
-            board.B.deck.LoadNext(first);
-            judge.ResetScore();
-            GigTimeLeft = gigSeconds;
+            board.B.deck.Pause();
         }
 
-        void StartFree()
+        void StartLive()
+        {
+            if (!builder.Set.Ready) { StartBuild(); return; }
+            lessons.Stop();
+            SetMode(GameMode.Live);
+            panel.SetActions("MENU", "RESTART", "END SET");
+            performer.Begin(builder.Set);
+        }
+
+        void StartFreestyle()
         {
             lessons.Stop();
-            Mode = GameMode.Free;
-            panel.SetActions("MENU", null, null);
+            performer.Stop();
+            SetMode(GameMode.Freestyle);
+            panel.SetActions("MENU");
             judge.ResetScore();
         }
 
-        void EndGig()
+        void ShowResults()
         {
-            Mode = GameMode.GigResults;
+            SetMode(GameMode.LiveResults);
             lastScore = judge.Score;
-            lastTransitions = judge.Transitions;
-            int best = PlayerPrefs.GetInt("bestGig", 0);
-            if (lastScore > best) { PlayerPrefs.SetInt("bestGig", (int)lastScore); PlayerPrefs.Save(); }
+            if (lastScore > PlayerPrefs.GetInt("bestSet", 0)) { PlayerPrefs.SetInt("bestSet", (int)lastScore); PlayerPrefs.Save(); }
             Sfx.Cheer(1f);
             BeatBus.FireDrop();
-            panel.SetActions("MENU", "PLAY AGAIN", "FREE PLAY");
+            panel.SetActions("MENU", "PLAY AGAIN", "EDIT SET", "FREESTYLE");
         }
-
-        public static int Stars(float score, int transitions) =>
-            score > 4500 && transitions >= 3 ? 3 : score > 2500 && transitions >= 1 ? 2 : score > 800 ? 1 : 0;
 
         void Update()
         {
-            if (Mode == GameMode.Gig)
-            {
-                GigTimeLeft -= Time.deltaTime;
-                if (GigTimeLeft <= 0) EndGig();
-            }
-
             Sfx.SetAmbience(environment.Mode == EnvMode.Room ? 0f : 0.05f + BeatBus.Energy * 0.25f);
             RefreshPanel();
         }
+
+        static string Title(int track) => TrackLibrary.Tracks[track].title;
 
         void RefreshPanel()
         {
             switch (Mode)
             {
-                case GameMode.Menu:
+                case GameMode.Title:
                     bool schooled = PlayerPrefs.GetInt("lessonComplete", 0) == 1;
-                    int best = PlayerPrefs.GetInt("bestGig", 0);
+                    int best = PlayerPrefs.GetInt("bestSet", 0);
                     panel.Show("DJ MASTER",
-                        schooled
-                            ? "Welcome back, DJ. Play a 3-minute gig and keep the crowd moving, or jam in free play. Use the scene buttons to switch between your room, a club and a festival."
-                            : "Learn to DJ with just your hands. New here? Start DJ SCHOOL: about 6 minutes from your first PLAY to your first real mix.",
-                        best > 0 ? $"Best gig: {best} pts" : "Tip: tap ROOM / CLUB / FESTIVAL below to change your surroundings.");
+                        "Choose a mode:\n" +
+                        $"{BoardColors.Blue("LEARN")}  a guided lesson: the board's colors, beatmatching and your first mix.\n" +
+                        $"{BoardColors.Pink("BUILD A SET")}  pick songs and transitions, then perform them live.\n" +
+                        $"{BoardColors.Yellow("FREESTYLE")}  just play, no rules.",
+                        best > 0 ? $"Best live set: {best} pts" : schooled ? "" : "New to DJing? Start with LEARN (about 7 minutes).");
                     break;
 
-                case GameMode.Lesson:
+                case GameMode.ChooseVenue:
+                    string what = ChosenMode == GameMode.Learn ? "LEARN" : ChosenMode == GameMode.Build ? "BUILD A SET" : "FREESTYLE";
+                    panel.Show("WHERE DO YOU WANT TO PLAY?",
+                        "MY ROOM  keep seeing your real surroundings (mixed reality).\n" +
+                        "CLUB  a dark club with lasers, a mirror ball and a packed dance floor.\n" +
+                        "FESTIVAL  a night-time main stage with fireworks and a huge crowd.",
+                        $"Mode: {what}.  You can switch anytime with the SCENE panel on your left.");
+                    break;
+
+                case GameMode.Learn:
                     var s = lessons.Current;
                     if (s == null) break;
                     string body = s.text;
                     if (lessons.ShowHint && !string.IsNullOrEmpty(s.hint)) body += "\n\nHINT: " + s.hint;
-                    panel.Show($"{lessons.StepIndex + 1}/{lessons.StepCount}  {s.title.ToUpper()}", body, "",
-                        lessons.Feedback);
+                    panel.Show($"{lessons.StepIndex + 1}/{lessons.StepCount}  {s.title.ToUpper()}", body, "", lessons.Feedback);
                     break;
 
-                case GameMode.Gig:
-                    panel.Show($"LIVE  {TextUtil.Clock(GigTimeLeft)}",
-                        judge.Warning != "" ? judge.Warning : "Keep the floor moving: beatmatch the next track, blend it in on a phrase, and swap the bass.",
-                        $"Score {judge.Score:0}   Transitions {judge.Transitions}   Crowd {(int)(BeatBus.Energy * 100)}%",
-                        judge.Shoutout);
+                case GameMode.Live:
+                    if (!performer.Running) break;
+                    var set = performer.Set;
+                    string title = $"LIVE  SONG {performer.SongIndex + 1}/{set.Count}  {TextUtil.Clock(performer.Elapsed)}";
+                    string text;
+                    if (performer.InFinale)
+                        text = $"Last song: {Title(set.songs[performer.SongIndex])}. Enjoy it! Try a {BoardColors.Yellow("FILTER")} sweep, a bass drop or the {BoardColors.Red("AIR HORN")}.\nSet ends in {TextUtil.Clock(performer.FinaleLeft)}.";
+                    else
+                    {
+                        var task = performer.CurrentTask;
+                        text = $"NEXT: {Title(performer.NextTrack)} with a {BoardColors.Yellow(SetList.Name(performer.NextStyle))}\n" +
+                               (task != null ? $"Step {performer.CurrentTaskIndex + 1}/{performer.Tasks.Count}: {task.text}" : "");
+                    }
+                    if (judge.Warning != "") text += "\n" + BoardColors.Red(judge.Warning);
+                    panel.Show(title, text, $"Score {judge.Score:0}   Crowd {(int)(BeatBus.Energy * 100)}%", judge.Shoutout);
                     break;
 
-                case GameMode.Free:
-                    panel.Show("FREE PLAY",
-                        judge.Warning != "" ? judge.Warning : "No timer, no pressure. Load tracks, try bass drops (cut the LOW, slam it back on bar 1) and filter sweeps.",
+                case GameMode.LiveResults:
+                    var results = performer.Results;
+                    int stars = SetPerformer.Stars(results);
+                    var sb = new System.Text.StringBuilder();
+                    foreach (var r in results)
+                    {
+                        string grade = r.grade == SetPerformer.Grade.Perfect ? BoardColors.Green("PERFECT") : r.grade == SetPerformer.Grade.Good ? BoardColors.Yellow("GOOD") : BoardColors.Red("ROUGH");
+                        sb.Append($"{SetList.Name(r.style)} into {Title(r.to)}: {grade}. {r.note}\n");
+                    }
+                    if (results.Count < performer.Set.Count - 1) sb.Append("You ended the set early.\n");
+                    panel.Show("SET COMPLETE!", sb.ToString().TrimEnd(),
+                        $"Score {lastScore:0}   Best {PlayerPrefs.GetInt("bestSet", 0)} pts",
+                        new string('*', stars) + new string('-', 3 - stars));
+                    break;
+
+                case GameMode.Freestyle:
+                    panel.Show("FREESTYLE",
+                        judge.Warning != "" ? judge.Warning : "No timer, no rules. LOAD tracks, mix between the decks, try bass drops (cut the LOW, slam it back on bar 1) and filter sweeps.",
                         $"Crowd {(int)(BeatBus.Energy * 100)}%", judge.Shoutout);
-                    break;
-
-                case GameMode.GigResults:
-                    int stars = Stars(lastScore, lastTransitions);
-                    panel.Show("SET COMPLETE!",
-                        $"Score {lastScore:0}  with {lastTransitions} transition{(lastTransitions == 1 ? "" : "s")}.\n" +
-                        (stars == 3 ? "Headliner material. The crowd wants an encore!" : stars == 2 ? "Solid set! Mix more often to reach headliner level." : "Keep practicing: beatmatch, then blend on a phrase line."),
-                        $"Best: {PlayerPrefs.GetInt("bestGig", 0)} pts", new string('*', stars) + new string('-', 3 - stars));
                     break;
             }
         }

@@ -21,8 +21,8 @@ namespace DJMaster.EditorTools
 
         static Font font;
         static Material glowMat, additiveMat, textMat;
-        static readonly Color DeckAColor = new Color(0.1f, 0.85f, 1f);
-        static readonly Color DeckBColor = new Color(1f, 0.25f, 0.75f);
+        static readonly Color DeckAColor = BoardColors.DeckA;
+        static readonly Color DeckBColor = BoardColors.DeckB;
         static readonly Color LabelColor = new Color(0.75f, 0.78f, 0.85f);
 
         [MenuItem("DJ Master/Build Scene")]
@@ -68,6 +68,7 @@ namespace DJMaster.EditorTools
             sync.mixer = mixer;
 
             var panel = BuildPanel(board.transform);
+            var builder = BuildSetBuilder(board.transform, deckA);
             var scenePanel = BuildScenePanel(board.transform, out var roomBtn, out var clubBtn, out var festBtn, out var recenterBtn, out var upBtn, out var downBtn);
 
             // ---------- Venues ----------
@@ -100,8 +101,12 @@ namespace DJMaster.EditorTools
             var lessons = directors.AddComponent<LessonDirector>();
             lessons.board = board; lessons.mixer = mixer; lessons.judge = judge;
 
+            var performer = directors.AddComponent<SetPerformer>();
+            performer.board = board; performer.mixer = mixer; performer.judge = judge;
+
             var game = directors.AddComponent<GameDirector>();
             game.board = board; game.mixer = mixer; game.judge = judge; game.lessons = lessons;
+            game.performer = performer; game.builder = builder;
             game.panel = panel; game.environment = env; game.anchor = anchor;
             game.roomButton = roomBtn; game.clubButton = clubBtn; game.festivalButton = festBtn;
             game.recenterButton = recenterBtn; game.raiseButton = upBtn; game.lowerButton = downBtn;
@@ -177,8 +182,8 @@ namespace DJMaster.EditorTools
 
                 var ch = new DeckControls { deck = deck };
                 ch.jog = MakeJog($"{p}.jog", t, new Vector3(dx, 0.016f, 0.035f), deck, platterMat, ring, white);
-                ch.play = MakeButton($"{p}.play", "PLAY", t, new Vector3(dx - 0.05f, 0.012f, -0.145f), new Vector2(0.038f, 0.034f), capMat, new Color(0.1f, 1f, 0.35f));
-                ch.cue = MakeButton($"{p}.cue", "CUE", t, new Vector3(dx + 0.002f, 0.012f, -0.145f), new Vector2(0.038f, 0.034f), capMat, new Color(1f, 0.6f, 0.1f));
+                ch.play = MakeButton($"{p}.play", "PLAY", t, new Vector3(dx - 0.05f, 0.012f, -0.145f), new Vector2(0.038f, 0.034f), capMat, BoardColors.Play);
+                ch.cue = MakeButton($"{p}.cue", "CUE", t, new Vector3(dx + 0.002f, 0.012f, -0.145f), new Vector2(0.038f, 0.034f), capMat, BoardColors.Cue);
                 ch.load = MakeButton($"{p}.load", "LOAD", t, new Vector3(dx + side * 0.045f, 0.01f, 0.16f), new Vector2(0.034f, 0.024f), capMat, color);
                 ch.tempo = MakeFader($"{p}.tempo", "TEMPO", t, new Vector3(side * 0.327f, 0f, 0f), 0.15f, false, slotMat, capMat, 0.5f);
                 ch.tempo.dragRatio = 0.35f;
@@ -191,12 +196,12 @@ namespace DJMaster.EditorTools
                 ch.high = MakeKnob($"{p}.high", t, new Vector3(mx, 0.02f, 0.165f), capMat, white, color);
                 ch.mid = MakeKnob($"{p}.mid", t, new Vector3(mx, 0.02f, 0.12f), capMat, white, color);
                 ch.low = MakeKnob($"{p}.low", t, new Vector3(mx, 0.02f, 0.075f), capMat, white, color);
-                ch.filter = MakeKnob($"{p}.filter", t, new Vector3(mx, 0.02f, 0.03f), capMat, white, new Color(0.9f, 0.9f, 0.3f));
+                ch.filter = MakeKnob($"{p}.filter", t, new Vector3(mx, 0.02f, 0.03f), capMat, white, BoardColors.Fx);
                 Label(t, "HI", new Vector3(labelX, 0.001f, 0.165f), 0.0012f, LabelColor);
                 Label(t, "MID", new Vector3(labelX, 0.001f, 0.12f), 0.0012f, LabelColor);
                 Label(t, "LOW", new Vector3(labelX, 0.001f, 0.075f), 0.0012f, LabelColor);
                 Label(t, "FILTER", new Vector3(labelX + side * 0.004f, 0.001f, 0.03f), 0.0011f, LabelColor);
-                ch.headphones = MakeButton($"{p}.headphones", "PHONES", t, new Vector3(mx, 0.01f, -0.012f), new Vector2(0.036f, 0.022f), capMat, new Color(1f, 0.85f, 0.1f));
+                ch.headphones = MakeButton($"{p}.headphones", "PHONES", t, new Vector3(mx, 0.01f, -0.012f), new Vector2(0.036f, 0.022f), capMat, BoardColors.Fx);
                 ch.volume = MakeFader($"{p}.volume", "", t, new Vector3(mx, 0f, -0.087f), 0.085f, false, slotMat, capMat, 0f);
                 Label(t, p, new Vector3(mx, 0.001f, -0.142f), 0.0022f, color);
 
@@ -207,9 +212,8 @@ namespace DJMaster.EditorTools
             board.crossfader = MakeFader("crossfader", "", t, new Vector3(0, 0f, -0.172f), 0.1f, true, slotMat, capMat, 0.5f);
             Label(t, "A", new Vector3(-0.065f, 0.001f, -0.172f), 0.0015f, DeckAColor);
             Label(t, "B", new Vector3(0.065f, 0.001f, -0.172f), 0.0015f, DeckBColor);
-            board.tap = MakeButton("tap", "TAP", t, new Vector3(0, 0.012f, 0.145f), new Vector2(0.03f, 0.03f), capMat, new Color(1f, 0.3f, 0.2f));
-            board.airHorn = MakeButton("airhorn", "HORN", t, new Vector3(0, 0.012f, 0.075f), new Vector2(0.03f, 0.03f), capMat, new Color(1f, 0.1f, 0.1f));
-            board.airHorn.onColor = new Color(1f, 0.15f, 0.1f);
+            board.tap = MakeButton("tap", "TAP", t, new Vector3(0, 0.012f, 0.145f), new Vector2(0.03f, 0.03f), capMat, BoardColors.Crowd);
+            board.airHorn = MakeButton("airhorn", "HORN", t, new Vector3(0, 0.012f, 0.075f), new Vector2(0.03f, 0.03f), capMat, BoardColors.Crowd);
 
             sync = MakeSyncMeter(t, new Vector3(0, 0.062f, 0.247f), screenMat);
             return board;
@@ -227,6 +231,7 @@ namespace DJMaster.EditorTools
             go.transform.localRotation = rot ?? Quaternion.identity;
             var b = go.AddComponent<PokeButton>();
             b.id = id; b.label = label; b.size = size; b.onColor = onColor;
+            b.offColor = Color.Lerp(new Color(0.1f, 0.1f, 0.11f), onColor, 0.3f); // a dim tint keeps the color code visible
 
             var bezel = Prim(PrimitiveType.Cube, "Bezel", go.transform, new Vector3(0, -0.011f, 0), new Vector3(size.x + 0.006f, 0.004f, size.y + 0.006f), Lit("Bezel", new Color(0.03f, 0.03f, 0.035f), 0.3f));
             var cap = Prim(PrimitiveType.Cube, "Cap", go.transform, new Vector3(0, -0.005f, 0), new Vector3(size.x, 0.01f, size.y), capMat);
@@ -383,16 +388,73 @@ namespace DJMaster.EditorTools
             p.wrapChars = 64;
 
             var faceUser = Quaternion.Euler(-90, 0, 0); // button +Y toward the player
-            p.actionButtons = new PokeButton[3];
-            p.actionLabels = new TextMesh[3];
-            for (int i = 0; i < 3; i++)
+            p.actionButtons = new PokeButton[4];
+            p.actionLabels = new TextMesh[4];
+            for (int i = 0; i < 4; i++)
             {
-                var b = MakeButton($"panel.action{i}", "", go.transform, new Vector3(-0.2f + i * 0.2f, -0.088f, -0.004f), new Vector2(0.15f, 0.034f), Unlit("Cap", Color.gray), DeckAColor,
-                    out var label, faceUser, 0.0016f, Color.white);
+                var b = MakeButton($"panel.action{i}", "", go.transform, new Vector3(-0.24f + i * 0.16f, -0.088f, -0.004f), new Vector2(0.145f, 0.034f), Unlit("Cap", Color.gray), DeckAColor,
+                    out var label, faceUser, 0.0015f, Color.white);
                 b.offColor = new Color(0.15f, 0.2f, 0.3f);
                 p.actionButtons[i] = b;
                 p.actionLabels[i] = label;
             }
+            return p;
+        }
+
+        // Build mode: the crate of songs, the transition styles and the set so far. Sits where the instruction panel does.
+        static SetBuilderPanel BuildSetBuilder(Transform board, Deck preview)
+        {
+            var go = new GameObject("SetBuilderPanel");
+            go.transform.SetParent(board, false);
+            go.transform.localPosition = new Vector3(0, 0.255f, 0.33f);
+            go.transform.localRotation = Quaternion.Euler(10, 0, 0);
+            var p = go.AddComponent<SetBuilderPanel>();
+            p.preview = preview;
+            var t = go.transform;
+            var faceUser = Quaternion.Euler(-90, 0, 0);
+            var capMat = Unlit("Cap", Color.gray);
+
+            Box("Back", t, new Vector3(0, 0, 0.004f), new Vector3(0.64f, 0.31f, 0.006f), Lit("PanelBack", new Color(0.04f, 0.04f, 0.06f), 0.6f));
+            Box("Edge", t, new Vector3(0, 0.155f, 0.003f), new Vector3(0.64f, 0.004f, 0.007f), Unlit("PanelEdgeB", DeckBColor));
+            Text("Title", t, new Vector3(-0.3f, 0.145f, 0), 0.0021f, TextAnchor.UpperLeft, new Color(1f, 0.85f, 0.3f)).text = "BUILD YOUR SET";
+            Text("HowTo", t, new Vector3(-0.3f, 0.112f, 0), 0.0011f, TextAnchor.UpperLeft, Color.white).text =
+                "1  Pick a transition style     2  Tap songs to add them in order     3  GO LIVE";
+            Text("CrateHeading", t, new Vector3(-0.3f, 0.09f, 0), 0.001f, TextAnchor.UpperLeft, LabelColor).text = "THE CRATE";
+            Text("StyleHeading", t, new Vector3(0.003f, 0.09f, 0), 0.001f, TextAnchor.UpperLeft, LabelColor).text = "TRANSITION STYLE";
+
+            PokeButton Btn(string id, Vector3 pos, Vector2 size, Color on, float labelSize, out TextMesh label)
+            {
+                var b = MakeButton(id, "", t, pos, size, capMat, on, out label, faceUser, labelSize, Color.white);
+                b.offColor = new Color(0.15f, 0.15f, 0.22f);
+                return b;
+            }
+
+            for (int i = 0; i < 8; i++)
+            {
+                var pos = new Vector3(i % 2 == 0 ? -0.232f : -0.088f, 0.065f - (i / 2) * 0.04f, -0.004f);
+                p.crateButtons[i] = Btn($"crate.{i}", pos, new Vector2(0.136f, 0.034f), DeckAColor, 0.0011f, out p.crateLabels[i]);
+            }
+            string[] styles = { "BLEND", "BASS SWAP", "FILTER", "QUICK CUT" };
+            for (int i = 0; i < 4; i++)
+            {
+                var pos = new Vector3(i % 2 == 0 ? 0.04f : 0.122f, 0.065f - (i / 2) * 0.04f, -0.004f);
+                p.styleButtons[i] = Btn($"style.{i}", pos, new Vector2(0.076f, 0.034f), BoardColors.Fx, 0.00105f, out var label);
+                label.text = styles[i];
+            }
+            p.info = Text("Info", t, new Vector3(0.003f, 0.0f, 0), 0.001f, TextAnchor.UpperLeft, LabelColor);
+            p.setText = Text("SetList", t, new Vector3(0.175f, 0.09f, 0), 0.00115f, TextAnchor.UpperLeft, Color.white);
+            p.status = Text("Status", t, new Vector3(-0.3f, -0.09f, 0), 0.0012f, TextAnchor.MiddleLeft, new Color(0.3f, 1f, 0.5f));
+
+            PokeButton Action(int i, string label, Color on)
+            {
+                var b = Btn($"build.action{i}", new Vector3(-0.24f + i * 0.16f, -0.125f, -0.004f), new Vector2(0.145f, 0.034f), on, 0.0015f, out var tm);
+                tm.text = label;
+                return b;
+            }
+            p.back = Action(0, "BACK", Color.white);
+            p.undo = Action(1, "UNDO", Color.white);
+            p.clear = Action(2, "CLEAR", Color.white);
+            p.goLive = Action(3, "GO LIVE", BoardColors.Play);
             return p;
         }
 
@@ -841,6 +903,31 @@ namespace DJMaster.EditorTools
             SetPreviewMode(env, EnvMode.Room);
             RenderPreview("Preview_Board.png", world.TransformPoint(new Vector3(0, 1.24f, 0.02f)), new Vector3(42, 0, 0), 62f, false);
             RenderPreview("Preview_Panel.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(8, 0, 0), 60f, false);
+
+            // The title menu and Build mode, filled in the way they look at runtime.
+            var panel = Object.FindAnyObjectByType<InstructionPanel>();
+            var builder = Object.FindAnyObjectByType<SetBuilderPanel>();
+            panel.Show("DJ MASTER",
+                "Choose a mode:\n" +
+                $"{BoardColors.Blue("LEARN")}  a guided lesson: the board's colors, beatmatching and your first mix.\n" +
+                $"{BoardColors.Pink("BUILD A SET")}  pick songs and transitions, then perform them live.\n" +
+                $"{BoardColors.Yellow("FREESTYLE")}  just play, no rules.",
+                "New to DJing? Start with LEARN (about 7 minutes).");
+            panel.SetActions("LEARN", "BUILD A SET", "FREESTYLE");
+            builder.gameObject.SetActive(false);
+            RenderPreview("Preview_Menu.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(14, 0, 0), 60f, false);
+
+            panel.gameObject.SetActive(false);
+            builder.gameObject.SetActive(true);
+            builder.Set.Clear();
+            builder.Set.Add(0, TransitionStyle.Blend);
+            builder.Set.Add(1, TransitionStyle.BassSwap);
+            builder.Set.Add(5, TransitionStyle.Cut);
+            builder.PickStyle(TransitionStyle.Cut);
+            builder.Refresh();
+            RenderPreview("Preview_Builder.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(14, 0, 0), 60f, false);
+            builder.gameObject.SetActive(false);
+            panel.gameObject.SetActive(true);
             RenderPreview("Preview_ScenePanel.png", world.TransformPoint(new Vector3(0, 1.24f, 0.0f)), new Vector3(15, -38, 0), 60f, false);
         }
 

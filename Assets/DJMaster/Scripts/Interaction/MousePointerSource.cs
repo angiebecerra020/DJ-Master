@@ -14,6 +14,9 @@ namespace DJMaster
         [Tooltip("Without a headset the camera sits at the rig origin, so lift it to seated eye height.")]
         public Transform rigRoot;
         public float editorEyeHeight = 1.24f;
+        [Tooltip("Start looking down at the board rather than at the wall.")]
+        public float editorPitch = 34f;
+        public float editorFov = 72f;
 
         Pointer pointer;
         Plane dragPlane;
@@ -28,12 +31,14 @@ namespace DJMaster
 
         void Start()
         {
-            if (!XRActive && rigRoot != null) rigRoot.position += Vector3.up * editorEyeHeight;
+            if (XRActive) return;
+            if (rigRoot != null) rigRoot.position += Vector3.up * editorEyeHeight;
+            if (cam != null) cam.fieldOfView = editorFov;
             if (lookPivot != null)
             {
-                var e = lookPivot.localEulerAngles;
-                yaw = e.y;
-                pitch = e.x > 180 ? e.x - 360 : e.x;
+                yaw = lookPivot.localEulerAngles.y;
+                pitch = editorPitch;
+                lookPivot.localRotation = Quaternion.Euler(pitch, yaw, 0);
             }
         }
 
